@@ -16,7 +16,9 @@ app.post('/webhook', (req, res) => {
   
   if (body.type === 'confirmation') {
     console.log('Sending confirmation code:', CONFIRMATION_CODE);
-    res.send(CONFIRMATION_CODE);
+    // ВАЖНО: явно указываем Content-Type и статус
+    res.set('Content-Type', 'text/plain');
+    res.status(200).send(CONFIRMATION_CODE);
     return;
   }
   
