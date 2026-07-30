@@ -7,54 +7,70 @@ app.use(bodyParser.json());
 
 const VK_TOKEN = process.env.VK_TOKEN;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
+
+// URL для отправки сообщений в Botpress Cloud
+const BOTPRESS_API_URL = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}`;
 
 app.post('/webhook', async (req, res) => {
   const body = req.body;
   
+  // Подтверждение сервера для VK
   if (body.type === 'confirmation') {
-    res.send(process.env.VK_CONFIRMATION_CODE || 'f2bc9be0');
+    const confirmationCode = process.env.VK_CONFIRMATION_CODE;
+    res.send(confirmationCode);
     return;
   }
   
+  // Обработка новых сообщений
   if (body.type === 'message_new') {
     const message = body.object.message;
-    const userId = message.from_id;
+    const userId = message.from_id || message.user_id;
     const text = message.text;
     
     try {
-      const response = await fetch(`https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}/conversations/default/messages`, {
+      // Отправляем сообщение в Botpress
+      const response = await fetch(`${BOTPRESS_API_URL}/conversations/default/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${BOTPRESS_API_KEY}`
         },
-        body: JSON.stringify({ type: 'text', text: text })
+        body: JSON.stringify({
+          type: 'text',
+          text: text,
+          userId: userId.toString()
+        })
       });
       
       const botResponse = await response.json();
       
+      // Получаем ответ от бота
       if (botResponse && botResponse.responses && botResponse.responses.length > 0) {
-        const reply = botResponse.responses[0].text;
+        const reply = botResponse.responses[0].text || botResponse.responses[0].payload;
         await sendVKMessage(userId, reply);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Error communicating with Botpress:', error);
     }
   }
   
   res.send('ok');
 });
 
+// Функция отправки сообщения в VK
 async function sendVKMessage(userId, text) {
-  await fetch(`https://api.vk.com/method/messages.send`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `access_token=${VK_TOKEN}&user_id=${userId}&message=${encodeURIComponent(text)}&v=5.199`
-  });
+  try {
+    await fetch(`https://api.vk.com/method/messages.send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `access_token=${VK_TOKEN}&user_id=${userId}&message=${encodeURIComponent(text)}&random_id=${Date.now()}&v=5.199`
+    });
+  } catch (error) {
+    console.error('Error sending VK message:', error);
+  }
 }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Bot ID: ${BOTPRESS_BOT_ID}`);
 });
