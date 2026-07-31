@@ -12,7 +12,7 @@ const VK_SECRET_KEY = process.env.VK_SECRET_KEY || ''; // Необязатель
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 
 // Используем настоящий Bot ID (из URL студии), а не Workspace ID
-const BOTPRESS_API_URL = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}/converse`;
+const BOTPRESS_API_URL = `https://webchat.botpress.cloud/3ff2ab80-c34f-4b5b-96b9-f71532b63f43`;
 
 // Токен из DevTools (пока используем его, если настоящий API ключ не найден)
 const BOTPRESS_API_KEY = 'eyJhbGciOiJIUzI1NiIsR5cClikpXVCJ9.eyJpCI6InVrZzXJfMDFLWVZOUUZGQVhYVDdQU0ZWME0wMjvc1S00iLCjYpXQjOjE3ODU0ODc2NzB9.cfnunvolA82XNJunqUM2c-3l0XhNTFPuPYiY4pGGHxs';
@@ -48,13 +48,16 @@ async function sendToVk(userId, text) {
 // Функция отправки в Botpress (по мотивам совета Алисы)
 async function sendToBotpress(userId, text) {
   try {
-    console.log(`🤖 Запрос к Botpress: ${BOTPRESS_API_URL}/${userId}`);
+    // Правильный URL на основе DevTools: /users/{userId}/messages
+    const messageUrl = `${BOTPRESS_API_URL}/users/${userId}/messages`;
     
-    const response = await fetch(`${BOTPRESS_API_URL}/${userId}`, {
+    console.log(`🤖 Запрос к Botpress: ${messageUrl}`);
+    
+    const response = await fetch(messageUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
+        'X-User-Key': BOTPRESS_API_KEY  // Используем токен из DevTools
       },
       body: JSON.stringify({
         type: 'text',
@@ -66,10 +69,9 @@ async function sendToBotpress(userId, text) {
       const data = await response.json();
       console.log('✅ Ответ Botpress:', JSON.stringify(data));
       
-      // Ищем текст в ответе (структура может отличаться, проверяем варианты)
       let reply = 'Извините, я не понял.';
       if (data.responses && data.responses.length > 0) {
-        reply = data.responses[0].text || data.responses[0].payload || reply;
+        reply = data.responses[0].text || data.responses[0].payload;
       } else if (data.output && data.output.text) {
         reply = data.output.text;
       }
@@ -77,12 +79,13 @@ async function sendToBotpress(userId, text) {
     } else {
       const errText = await response.text();
       console.error(`⚠️ Ошибка Botpress (${response.status}):`, errText);
-      return null; // Возвращаем null, чтобы сработал запасной вариант
+      return null;
     }
   } catch (err) {
     console.error('❌ Ошибка сети Botpress:', err.message);
     return null;
   }
+}
 }
 
 // ГЛАВНЫЙ ОБРАБОТЧИК ВЕБХУКА
