@@ -9,18 +9,17 @@ app.use(bodyParser.json());
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// =================================================================
-// АДРЕС ВЕБХУКА ИЗ BOTPRESS
-// =================================================================
-const BOTPRESS_WEBHOOK_URL = 'https://webhook.botpress.cloud/2526d31b-9cca-46c0-80c8-58e01bb7d205';
+// === Адрес Chat API Botpress (работает всегда) ===
+const BOTPRESS_CHAT_URL = 'https://chat.botpress.cloud/api/v1/messages';
 
 function logEnv() {
   console.log('=== ENV CHECK ===');
   console.log('VK_TOKEN set:', !!VK_TOKEN);
   console.log('VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
   console.log('VK_SECRET set:', !!VK_SECRET);
-  console.log('BOTPRESS_WEBHOOK_URL:', BOTPRESS_WEBHOOK_URL);
+  console.log('BOTPRESS_API_KEY set:', !!BOTPRESS_API_KEY);
   console.log('==================');
 }
 
@@ -40,12 +39,8 @@ async function sendToVk(userId, text) {
   });
 
   try {
-    console.log(`➡️ VK API: ${url}?${params.toString()}`);
     const res = await fetch(`${url}?${params.toString()}`);
     const data = await res.json();
-
-    console.log('⬅️ VK response:', JSON.stringify(data));
-
     if (data.error) {
       console.error('❌ Ошибка ВК:', data.error);
     } else {
@@ -57,79 +52,57 @@ async function sendToVk(userId, text) {
 }
 
 async function sendToBotpress(userId, text) {
+  if (!BOTPRESS_API_KEY) {
+    console.error('❌ ОШИБКА: Не задан BOTPRESS_API_KEY');
+    return null;
+  }
+
   try {
-    console.log(`🤖 Webhook: POST ${BOTPRESS_WEBHOOK_URL}`);
+    console.log(`🤖 Chat API: POST ${BOTPRESS_CHAT_URL}`);
     console.log(`   Текст: "${text}"`);
 
-    const res = await fetch(BOTPRESS_WEBHOOK_URL, {
+    const res = await fetch(BOTPRESS_CHAT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-bp-user-id': String(userId) 
+        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
       },
       body: JSON.stringify({
+        userId: String(userId),
+        conversationId: String(userId),
         text: text
       })
     });
 
     const raw = await res.text();
-    console.log(`   Статус Botpress: ${res.status}`);
-    
-    if (!raw || raw.trim() === '') {
-        console.log('⚠️ Botpress вернул пустой ответ.');
-        return null;
-    }
+    console.log(`   Статус Chat API: ${res.status}`);
 
-    console.log('   RAW Botpress response:', raw);
+    if (!res.ok) {
+      console.error('⚠️ Ошибка Chat API:', raw);
+      return null;
+    }
 
     let data;
     try {
-      const trimmed = raw.trim();
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        data = JSON.parse(trimmed);
-      } else {
-        console.warn('⚠️ Ответ Botpress не в JSON-формате. Возвращаю как есть.');
-        return raw;
-      }
+      data = JSON.parse(raw);
     } catch (e) {
-      console.error('❌ Ошибка парсинга JSON Botpress:', e.message);
+      console.error('❌ Ошибка парсинга JSON:', raw);
       return null;
     }
 
-    console.log('📦 Parsed Botpress JSON:', JSON.stringify(data, null, 2));
+    console.log('📦 Ответ Chat API:', JSON.stringify(data, null, 2));
 
+    // Ищем текст в ответе
     let reply = null;
-
-    // 1. Ищем в простом поле text
-    if (data.text) {
-        reply = data.text;
-    } 
-    // 2. Ищем в поле body.text (базовый уровень)
-    else if (data.body && data.body.text) {
+    if (data.body && data.body.text) {
       reply = data.body.text;
-    }
-    // 3. Ищем в стандартном массиве ответов (если это вопрос-анкета)
-    else if (data.body && Array.isArray(data.body)) {
-        // Пробегаемся по массиву, собираем всё, что похоже на текст
-        const textParts = data.body.map(item => {
-            if (item.text) return item.text;
-            if (item.payload && item.payload.text) return item.payload.text;
-            return null;
-        }).filter(item => item !== null);
-
-        if (textParts.length > 0) {
-            reply = textParts.join('\n'); // Склеиваем вопросы через перенос строки
-        }
-    }
-
-    if (!reply) {
-      console.log('⚠️ Botpress вернул JSON, но не нашел поле "text".');
-      return null;
+    } else if (Array.isArray(data.body) && data.body.length > 0) {
+      reply = data.body[0].text;
     }
 
     return reply;
   } catch (err) {
-    console.error('❌ Ошибка сети Botpress:', err.message);
+    console.error('❌ Ошибка соединения с Botpress:', err.message);
     return null;
   }
 }
@@ -139,20 +112,7 @@ app.post('/webhook', async (req, res) => {
   console.log('📨 Webhook:', JSON.stringify(body));
 
   if (body.type === 'confirmation') {
-    console.log('🔐 Запрос подтверждения от ВК');
-    
-    if (VK_SECRET && body.secret && body.secret !== VK_SECRET) {
-      console.error('❌ Секретный ключ не совпадает!');
-      res.status(403).type('text/plain').send('secret mismatch');
-      return;
-    }
-
-    if (!VK_CONFIRMATION_CODE) {
-      console.error('❌ VK_CONFIRMATION_CODE не задан в переменных окружения!');
-      res.status(500).type('text/plain').send('confirmation code not set');
-      return;
-    }
-
+    console.log('🔐 Подтверждение сервера ВК');
     res.status(200).type('text/plain').send(VK_CONFIRMATION_CODE);
     return;
   }
@@ -167,7 +127,7 @@ app.post('/webhook', async (req, res) => {
     let replyText = await sendToBotpress(userId, text);
 
     if (!replyText) {
-      console.log('⚠️ Botpress не дал ответа.');
+      console.log('⚠️ Chat API не дал ответа.');
       replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Пожалуйста, подождите, я настраиваюсь.';
     }
 
@@ -182,16 +142,10 @@ app.get('/webhook', (req, res) => {
   res.send('VK-Botpress bridge is running!');
 });
 
-app.get('/', (req, res) => {
-  logEnv();
-  res.send('Server is alive! 🚀');
-});
-
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
   console.log('🚀 Сервер запущен!');
-  console.log(`📍 Порт: ${PORT}`);
   console.log('===========================================\n');
   logEnv();
 });
