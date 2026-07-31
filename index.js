@@ -11,11 +11,10 @@ const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 
 // =================================================================
-// АДРЕС ВЕБХУКА ИЗ BOTPRESS (он уже вставлен)
+// АДРЕС ВЕБХУКА ИЗ BOTPRESS
 // =================================================================
 const BOTPRESS_WEBHOOK_URL = 'https://webhook.botpress.cloud/2526d31b-9cca-46c0-80c8-58e01bb7d205';
 
-// === Вспомогательная функция логирования ===
 function logEnv() {
   console.log('=== ENV CHECK ===');
   console.log('VK_TOKEN set:', !!VK_TOKEN);
@@ -25,7 +24,6 @@ function logEnv() {
   console.log('==================');
 }
 
-// === Отправка сообщения пользователю ВК ===
 async function sendToVk(userId, text) {
   if (!VK_TOKEN) {
     console.error('❌ ОШИБКА: Не задан VK_TOKEN');
@@ -58,7 +56,6 @@ async function sendToVk(userId, text) {
   }
 }
 
-// === Отправка сообщения в Botpress через ВЕБХУК ===
 async function sendToBotpress(userId, text) {
   try {
     console.log(`🤖 Webhook: POST ${BOTPRESS_WEBHOOK_URL}`);
@@ -78,10 +75,8 @@ async function sendToBotpress(userId, text) {
     const raw = await res.text();
     console.log(`   Статус Botpress: ${res.status}`);
     
-    // Если ответ пустой (или не JSON), значит Botpress промолчал.
-    // В этом случае возвращаем null, чтобы скрипт использовал запасной вариант.
     if (!raw || raw.trim() === '') {
-        console.log('⚠️ Botpress вернул пустой ответ. Скорее всего, сценарий не опубликован.');
+        console.log('⚠️ Botpress вернул пустой ответ.');
         return null;
     }
 
@@ -93,8 +88,8 @@ async function sendToBotpress(userId, text) {
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         data = JSON.parse(trimmed);
       } else {
-        console.warn('⚠️ Ответ Botpress не в JSON-формате, но он не пустой. Возвращаю как есть.');
-        return raw; // Если это просто текст, вернем его
+        console.warn('⚠️ Ответ Botpress не в JSON-формате. Возвращаю как есть.');
+        return raw;
       }
     } catch (e) {
       console.error('❌ Ошибка парсинга JSON Botpress:', e.message);
@@ -105,10 +100,26 @@ async function sendToBotpress(userId, text) {
 
     let reply = null;
 
+    // 1. Ищем в простом поле text
     if (data.text) {
         reply = data.text;
-    } else if (data.body && data.body.text) {
+    } 
+    // 2. Ищем в поле body.text (базовый уровень)
+    else if (data.body && data.body.text) {
       reply = data.body.text;
+    }
+    // 3. Ищем в стандартном массиве ответов (если это вопрос-анкета)
+    else if (data.body && Array.isArray(data.body)) {
+        // Пробегаемся по массиву, собираем всё, что похоже на текст
+        const textParts = data.body.map(item => {
+            if (item.text) return item.text;
+            if (item.payload && item.payload.text) return item.payload.text;
+            return null;
+        }).filter(item => item !== null);
+
+        if (textParts.length > 0) {
+            reply = textParts.join('\n'); // Склеиваем вопросы через перенос строки
+        }
     }
 
     if (!reply) {
@@ -123,7 +134,6 @@ async function sendToBotpress(userId, text) {
   }
 }
 
-// === Обработка VK Callback API ===
 app.post('/webhook', async (req, res) => {
   const body = req.body;
   console.log('📨 Webhook:', JSON.stringify(body));
@@ -158,7 +168,6 @@ app.post('/webhook', async (req, res) => {
 
     if (!replyText) {
       console.log('⚠️ Botpress не дал ответа.');
-      // Теперь мы отправляем пользователю вежливый ответ вместо ошибки.
       replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Пожалуйста, подождите, я настраиваюсь.';
     }
 
@@ -178,7 +187,6 @@ app.get('/', (req, res) => {
   res.send('Server is alive! 🚀');
 });
 
-// Запуск сервера
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
