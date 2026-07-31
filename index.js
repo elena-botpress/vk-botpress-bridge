@@ -5,21 +5,24 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(bodyParser.json());
 
-const VK_TOKEN = process.env.VK_TOKEN;
-const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
-const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
+// === Переменные окружения (обязательно задать в Render) ===
+const VK_TOKEN = process.env.VK_TOKEN;                  // токен сообщества ВК
+const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE; // код подтверждения из настроек Callback API
+const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;    // Bot ID из Botpress Cloud
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;  // API key Botpress (НЕ хардкодить)
 
-// НОВЫЙ API ключ из Botpress
-const BOTPRESS_API_KEY = 'bp_bak_TPvTrqN3Fru6tN6UYY2N6RsOKLExq3gir7Oi';
+// Базовый URL Converse API Botpress Cloud
+// см. документацию Botpress: /api/v1/bots/{botId}/converse/{userId} [20][28]
+const BOTPRESS_CONVERSE_BASE = `https://api.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
 
-const BOTPRESS_API_BASE = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}`;
-
+// === Отправка сообщения пользователю ВК ===
 async function sendToVk(userId, text) {
   if (!VK_TOKEN) {
     console.error('❌ ОШИБКА: Не задан VK_TOKEN');
     return;
   }
-  const url = `https://api.vk.com/method/messages.send`;
+
+  const url = 'https://api.vk.com/method/messages.send';
   const params = new URLSearchParams({
     user_id: userId,
     message: text,
@@ -31,6 +34,7 @@ async function sendToVk(userId, text) {
   try {
     const res = await fetch(`${url}?${params.toString()}`);
     const data = await res.json();
+
     if (data.error) {
       console.error('❌ Ошибка ВК:', data.error);
     } else {
@@ -41,35 +45,20 @@ async function sendToVk(userId, text) {
   }
 }
 
+// === Отправка сообщения в Botpress через Converse API ===
 async function sendToBotpress(userId, text) {
+  if (!BOTPRESS_BOT_ID || !BOTPRESS_API_KEY) {
+    console.error('❌ ОШИБКА: Не заданы BOTPRESS_BOT_ID или BOTPRESS_API_KEY');
+    return null;
+  }
+
   try {
-    const conversationId = `user-${userId}`;
-    
-    console.log(`🤖 Шаг 1: Создаём conversation ${conversationId}`);
-    
-    // Шаг 1: Создаём conversation
-    const createConvResponse = await fetch(`${BOTPRESS_API_BASE}/conversations`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
-      },
-      body: JSON.stringify({
-        id: conversationId
-      })
-    });
+    const url = `${BOTPRESS_CONVERSE_BASE}/converse/${userId}`;
 
-    console.log(`   Create conversation status: ${createConvResponse.status}`);
-    
-    if (!createConvResponse.ok && createConvResponse.status !== 409) {
-      const errText = await createConvResponse.text();
-      console.error(`   ⚠️ Ошибка создания conversation: ${errText}`);
-    }
+    console.log(`🤖 Converse API: POST ${url}`);
+    console.log(`   Текст: "${text}"`);
 
-    // Шаг 2: Отправляем сообщение в conversation
-    console.log(`💬 Шаг 2: Отправляем сообщение в conversation`);
-    
-    const messageResponse = await fetch(`${BOTPRESS_API_BASE}/conversations/${conversationId}/messages`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -77,77 +66,93 @@ async function sendToBotpress(userId, text) {
       },
       body: JSON.stringify({
         type: 'text',
-        text: text
+        text
       })
     });
 
-    console.log(`   Send message status: ${messageResponse.status}`);
+    const data = await res.json();
+    console.log(`   Статус Botpress: ${res.status}`);
+    console.log('   Ответ Botpress:', JSON.stringify(data));
 
-    if (messageResponse.ok) {
-      const data = await messageResponse.json();
-      console.log('✅ Ответ Botpress:', JSON.stringify(data));
-      
-      let reply = 'Извините, я не понял.';
-      if (data.responses && data.responses.length > 0) {
-        reply = data.responses[0].text || data.responses[0].payload;
-      } else if (data.output && data.output.text) {
-        reply = data.output.text;
-      }
-      return reply;
-    } else {
-      const errText = await messageResponse.text();
-      console.error(`⚠️ Ошибка отправки сообщения (${messageResponse.status}):`, errText);
+    if (!res.ok) {
+      console.error('⚠️ Ошибка Botpress:', res.status, JSON.stringify(data));
       return null;
     }
+
+    // Пробуем достать текст ответа из стандартных полей Botpress [28][27]
+    let reply = null;
+
+    if (Array.isArray(data.responses) && data.responses.length > 0) {
+      const r = data.responses[0];
+      reply = r.text || r.payload?.text || r.payload;
+    } else if (data.output && data.output.text) {
+      reply = data.output.text;
+    }
+
+    if (!reply) {
+      reply = 'Извините, я не смог сформировать ответ.';
+    }
+
+    return reply;
   } catch (err) {
     console.error('❌ Ошибка сети Botpress:', err.message);
     return null;
   }
 }
 
+// === Обработка VK Callback API ===
 app.post('/webhook', async (req, res) => {
   const body = req.body;
   console.log('📨 Webhook:', JSON.stringify(body));
 
+  // 1) Подтверждение адреса
   if (body.type === 'confirmation') {
-    console.log('🔐 Confirmation code:', VK_CONFIRMATION_CODE);
+    console.log('🔐 Запрос подтверждения от ВК');
+    console.log('   Ожидаемый код подтверждения:', VK_CONFIRMATION_CODE);
+
+    // ВК ожидает в ответе СТРОГО этот код, без JSON, без лишнего текста [11][13]
     res.status(200).type('text/plain').send(VK_CONFIRMATION_CODE);
     return;
   }
 
+  // 2) Новое сообщение
   if (body.type === 'message_new') {
-    const userId = body.object.message.from_id;
-    const text = body.object.message.text || '';
+    const message = body.object?.message || {};
+    const userId = message.from_id;
+    const text = message.text || '';
+
     console.log(`\n💬 Сообщение от ${userId}: "${text}"`);
 
     try {
       let replyText = await sendToBotpress(userId, text);
 
       if (!replyText) {
-        console.log('⚠️ Botpress не ответил, использую запасной вариант');
+        console.log('⚠️ Botpress не дал ответа, использую запасной вариант');
         replyText = `Вы написали: "${text}". (Botpress временно недоступен)`;
       }
 
       console.log(`🤖 Отправляю пользователю: "${replyText}"`);
       await sendToVk(userId, replyText);
-
     } catch (error) {
-      console.error('❌ Критическая ошибка:', error.message);
+      console.error('❌ Критическая ошибка при обработке сообщения:', error.message);
       await sendToVk(userId, 'Произошла техническая ошибка.');
     }
   }
 
-  res.send('ok');
+  // ВК ожидает 'ok' в теле ответа для любых событий
+  res.status(200).send('ok');
 });
 
+// Простой GET для проверки, что сервис жив
 app.get('/webhook', (req, res) => {
-  res.send('VK-Botpress Bridge is running!');
+  res.send('VK-Botpress bridge is running!');
 });
 
 app.get('/', (req, res) => {
   res.send('Server is alive! 🚀');
 });
 
+// Запуск сервера
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
