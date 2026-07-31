@@ -5,17 +5,21 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(bodyParser.json());
 
+// Переменные окружения из Render
 const VK_TOKEN = process.env.VK_TOKEN;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 
-// ТОКЕН из DevTools
+// Токен из DevTools (X-User-Key)
 const BOTPRESS_API_KEY = 'eyJhbGciOiJIUzI1NiIsR5cClikpXVCJ9.eyJpCI6InVrZzXJfMDFLWVZOUUZGQVhYVDdQU0ZWME0wMjvc1S00iLCjYpXQjOjE3ODU0ODc2NzB9.cfnunvolA82XNJunqUM2c-3l0XhNTFPuPYiY4pGGHxs';
 
-// ПРАВИЛЬНЫЙ URL (БЕЗ /v1/bots/, используем workspace ID из DevTools)
-const WORKSPACE_ID = '3ff2ab80-c34f-4b5b-96b9-f71532b63f43'; // ИЗ DEVTOOLS!
+// Workspace ID из DevTools
+const WORKSPACE_ID = '3ff2ab80-c34f-4b5b-96b9-f71532b63f43';
+
+// ПРАВИЛЬНЫЙ URL на основе DevTools
 const BOTPRESS_WEBCHAT_URL = `https://webchat.botpress.cloud/${WORKSPACE_ID}`;
 
+// Функция для отправки сообщений в ВКонтакте
 async function sendVkMessage(userId, text) {
   if (!VK_TOKEN) {
     console.error('❌ ОШИБКА: Не найден VK_TOKEN!');
@@ -44,24 +48,24 @@ async function sendVkMessage(userId, text) {
   }
 }
 
+// Функция для отправки сообщения в Botpress
 async function sendToBotpress(userId, text) {
   console.log('🤖 Отправляем в Botpress...');
   console.log(`   Workspace ID: ${WORKSPACE_ID}`);
-  console.log(`   Bot ID: ${BOTPRESS_BOT_ID}`);
   console.log(`   User ID: ${userId}`);
   
-  // Правильный URL из DevTools
-  const messageUrl = `${BOTPRESS_WEBCHAT_URL}/webchat/${userId}/messages`;
+  // ПРАВИЛЬНЫЙ URL: /users/{userId}/messages (на основе DevTools)
+  const messageUrl = `${BOTPRESS_WEBCHAT_URL}/users/${userId}/messages`;
   
   console.log(`   URL: ${messageUrl}`);
+  console.log(`   Метод: POST`);
   
   try {
     const response = await fetch(messageUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`,
-        'X-User-Key': BOTPRESS_API_KEY
+        'X-User-Key': BOTPRESS_API_KEY  // Только X-User-Key, без Authorization!
       },
       body: JSON.stringify({
         type: 'text',
@@ -86,19 +90,21 @@ async function sendToBotpress(userId, text) {
       return replyText;
     } else {
       const errorText = await response.text();
-      console.error(`❌ Ошибка Botpress (${response.status}):`, errorText);
+      console.error(` Ошибка Botpress (${response.status}):`, errorText);
       return null;
     }
   } catch (err) {
-    console.error('❌ Ошибка сети:', err.message);
+    console.error(' Ошибка сети:', err.message);
     return null;
   }
 }
 
+// ОБРАБОТЧИК ВЕБХУКА
 app.post('/webhook', async (req, res) => {
   const body = req.body;
   console.log('📨 Webhook:', JSON.stringify(body, null, 2));
 
+  // 1. Обработка подтверждения сервера
   if (body.type === 'confirmation') {
     console.log('🔐 Confirmation code:', CONFIRMATION_CODE);
     res.set('Content-Type', 'text/plain');
@@ -106,20 +112,22 @@ app.post('/webhook', async (req, res) => {
     return;
   }
 
+  // 2. Обработка входящих сообщений
   if (body.type === 'message_new') {
     const userId = body.object.message.from_id;
     const text = body.object.message.text || '';
 
-    console.log(`\n📩 Сообщение от ${userId}: "${text}"`);
+    console.log(`\n Сообщение от ${userId}: "${text}"`);
+    console.log('='.repeat(50));
 
     try {
       const replyText = await sendToBotpress(userId, text);
       
       if (!replyText) {
-        console.log('⚠️ Botpress не ответил, используем fallback');
+        console.log('️ Botpress не ответил, используем fallback');
         await sendVkMessage(userId, `Вы написали: "${text}" (Botpress недоступен)`);
       } else {
-        console.log(`🤖 Ответ: "${replyText}"`);
+        console.log(` Ответ: "${replyText}"`);
         await sendVkMessage(userId, replyText);
       }
 
@@ -129,9 +137,11 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
+  // 3. Ответ серверу ВК "OK"
   res.send('ok');
 });
 
+// Проверка доступности сервера
 app.get('/webhook', (req, res) => {
   res.send('VK-Botpress Bridge is running!');
 });
@@ -140,13 +150,14 @@ app.get('/', (req, res) => {
   res.send('VK-Botpress Bridge Server is running! ');
 });
 
+// ЗАПУСК СЕРВЕРА
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
-  console.log(' VK-Botpress Bridge Server Started!');
+  console.log('🚀 VK-Botpress Bridge Server Started!');
   console.log(`📍 Port: ${PORT}`);
-  console.log(`🤖 Bot ID: ${BOTPRESS_BOT_ID}`);
+  console.log(` Bot ID: ${BOTPRESS_BOT_ID}`);
   console.log(`🏢 Workspace ID: ${WORKSPACE_ID}`);
-  console.log(`🔗 Webchat URL: ${BOTPRESS_WEBCHAT_URL}`);
+  console.log(` Webchat URL: ${BOTPRESS_WEBCHAT_URL}`);
   console.log('===========================================\n');
 });
