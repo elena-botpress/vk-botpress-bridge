@@ -5,17 +5,17 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(bodyParser.json());
 
-// === Переменные окружения ===
+// === Переменные окружения (их вы задали в Render) ===
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 
-const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
-
-// === ИСПРАВЛЕННЫЙ URL ДЛЯ НОВОГО ИНТЕРФЕЙСА BOTPRESS (Workflows) ===
-// Мы используем /message вместо /converse. Это ключевое изменение!
-const BOTPRESS_API_URL = `https://chat.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}/message`;
+// =================================================================
+// ВАШ АДРЕС ВЕБХУКА ИЗ BOTPRESS УЖЕ ВСТАВЛЕН СЮДА!
+// Ничего менять не нужно, скрипт сразу готов к работе.
+// =================================================================
+const BOTPRESS_WEBHOOK_URL = 'https://webhook.botpress.cloud/2526d31b-9cca-46c0-80c8-58e01bb7d205';
+// =================================================================
 
 // === Вспомогательная функция логирования ===
 function logEnv() {
@@ -23,8 +23,7 @@ function logEnv() {
   console.log('VK_TOKEN set:', !!VK_TOKEN);
   console.log('VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
   console.log('VK_SECRET set:', !!VK_SECRET);
-  console.log('BOTPRESS_BOT_ID:', BOTPRESS_BOT_ID);
-  console.log('BOTPRESS_API_KEY set:', !!BOTPRESS_API_KEY);
+  console.log('BOTPRESS_WEBHOOK_URL:', BOTPRESS_WEBHOOK_URL);
   console.log('==================');
 }
 
@@ -61,26 +60,25 @@ async function sendToVk(userId, text) {
   }
 }
 
-// === Отправка сообщения в Botpress через Message API ===
+// === Отправка сообщения в Botpress через ВЕБХУК ===
 async function sendToBotpress(userId, text) {
-  if (!BOTPRESS_BOT_ID || !BOTPRESS_API_KEY) {
-    console.error('❌ ОШИБКА: Не заданы BOTPRESS_BOT_ID или BOTPRESS_API_KEY');
+  if (!BOTPRESS_WEBHOOK_URL) {
+    console.error('❌ ОШИБКА: Не задан BOTPRESS_WEBHOOK_URL!');
     return null;
   }
 
   try {
-    console.log(`🤖 Message API: POST ${BOTPRESS_API_URL}`);
+    console.log(`🤖 Webhook: POST ${BOTPRESS_WEBHOOK_URL}`);
     console.log(`   Текст: "${text}"`);
 
-    // В новом API мы должны отправлять строго структуру { "text": "..." } 
-    const res = await fetch(BOTPRESS_API_URL, {
+    const res = await fetch(BOTPRESS_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
+        'x-bp-user-id': String(userId) 
       },
       body: JSON.stringify({
-        text: text // Убрали "type", оставили только text
+        text: text
       })
     });
 
@@ -89,7 +87,7 @@ async function sendToBotpress(userId, text) {
     console.log('   RAW Botpress response:', raw);
 
     if (!res.ok) {
-      console.error('⚠️ Ошибка Botpress:', res.status, raw);
+      console.error('⚠️ Ошибка Botpress (Webhook):', res.status, raw);
       return null;
     }
 
@@ -109,21 +107,12 @@ async function sendToBotpress(userId, text) {
 
     console.log('📦 Parsed Botpress JSON:', JSON.stringify(data, null, 2));
 
-    // === НОВАЯ ЛОГИКА ПОИСКА ОТВЕТА (для Workflows) ===
     let reply = null;
 
-    // 1. Сначала смотрим, есть ли текст в поле body.text (самый частый случай в Workflows)
-    if (data.body && data.body.text) {
+    if (data.text) {
+        reply = data.text;
+    } else if (data.body && data.body.text) {
       reply = data.body.text;
-    } 
-    // 2. Иногда ответы приходят как массив (если несколько сообщений)
-    else if (Array.isArray(data.body) && data.body.length > 0) {
-        const firstElement = data.body[0];
-        if (firstElement.text) reply = firstElement.text;
-    }
-    // 3. Или просто массив объектов, если массив в корне
-    else if (Array.isArray(data) && data.length > 0) {
-        if (data[0].text) reply = data[0].text;
     }
 
     if (!reply) {
@@ -198,7 +187,6 @@ app.listen(PORT, () => {
   console.log('\n===========================================');
   console.log('🚀 Сервер запущен!');
   console.log(`📍 Порт: ${PORT}`);
-  console.log(`🤖 Bot ID: ${BOTPRESS_BOT_ID}`);
   console.log('===========================================\n');
   logEnv();
 });
