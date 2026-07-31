@@ -11,8 +11,8 @@ const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === Адрес Chat API Botpress (работает всегда) ===
-const BOTPRESS_CHAT_URL = 'https://chat.botpress.cloud/api/v1/messages';
+// === КОНЕЧНЫЙ URL ДЛЯ СВЯЗИ С BOTPRESS (НЕ ИСПОЛЬЗУЕТ ВЕБХУК) ===
+const BOTPRESS_API_URL = 'https://api.botpress.cloud/v1/chat/messages';
 
 function logEnv() {
   console.log('=== ENV CHECK ===');
@@ -58,10 +58,10 @@ async function sendToBotpress(userId, text) {
   }
 
   try {
-    console.log(`🤖 Chat API: POST ${BOTPRESS_CHAT_URL}`);
+    console.log(`🤖 API Botpress (v1): POST ${BOTPRESS_API_URL}`);
     console.log(`   Текст: "${text}"`);
 
-    const res = await fetch(BOTPRESS_CHAT_URL, {
+    const res = await fetch(BOTPRESS_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -75,10 +75,10 @@ async function sendToBotpress(userId, text) {
     });
 
     const raw = await res.text();
-    console.log(`   Статус Chat API: ${res.status}`);
+    console.log(`   Статус: ${res.status}`);
 
     if (!res.ok) {
-      console.error('⚠️ Ошибка Chat API:', raw);
+      console.error('⚠️ Ошибка API Botpress:', raw);
       return null;
     }
 
@@ -90,9 +90,9 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    console.log('📦 Ответ Chat API:', JSON.stringify(data, null, 2));
+    console.log('📦 Ответ Botpress:', JSON.stringify(data, null, 2));
 
-    // Ищем текст в ответе
+    // Поиск ответа
     let reply = null;
     if (data.body && data.body.text) {
       reply = data.body.text;
@@ -127,7 +127,7 @@ app.post('/webhook', async (req, res) => {
     let replyText = await sendToBotpress(userId, text);
 
     if (!replyText) {
-      console.log('⚠️ Chat API не дал ответа.');
+      console.log('⚠️ Botpress не дал ответа.');
       replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Пожалуйста, подождите, я настраиваюсь.';
     }
 
