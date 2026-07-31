@@ -15,7 +15,7 @@ const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const BOTPRESS_API_URL = `https://webchat.botpress.cloud/3ff2ab80-c34f-4b5b-96b9-f71532b63f43`;
 
 // Токен из DevTools (пока используем его, если настоящий API ключ не найден)
-const BOTPRESS_API_KEY = 'eyJhbGciOiJIUzI1NiIsR5cClikpXVCJ9.eyJpCI6InVrZzXJfMDFLWVZOUUZGQVhYVDdQU0ZWME0wMjvc1S00iLCjYpXQjOjE3ODU0ODc2NzB9.cfnunvolA82XNJunqUM2c-3l0XhNTFPuPYiY4pGGHxs';
+const BOTPRESS_API_KEY = 'bp_bak_TPvTrqN3Fru6tN6UYY2N6RsOKLExq3gir7Oi';
 
 // Функция отправки в ВК
 async function sendToVk(userId, text) {
