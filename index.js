@@ -13,9 +13,8 @@ const CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 // API ключ Botpress Cloud (найден через DevTools)
 const BOTPRESS_API_KEY = 'eyJhbGciOiJIUzI1NiIsR5cClikpXVCJ9.eyJpCI6InVrZzXJfMDFLWVZOUUZGQVhYVDdQU0ZWME0wMjvc1S00iLCjYpXQjOjE3ODU0ODc2NzB9.cfnunvolA82XNJunqUM2c-3l0XhNTFPuPYiY4pGGHxs';
 
-// Базовые URL для Botpress Cloud API
-const BOTPRESS_API_BASE = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}`;
-const BOTPRESS_WEBCHAT_BASE = `https://webchat.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}`;
+// ПРАВИЛЬНЫЙ URL для Botpress Cloud Webchat (БЕЗ /v1/bots/)
+const BOTPRESS_WEBCHAT_URL = `https://webchat.botpress.cloud/${BOTPRESS_BOT_ID}`;
 
 // Функция для отправки сообщений обратно в ВКонтакте
 async function sendVkMessage(userId, text) {
@@ -46,54 +45,24 @@ async function sendVkMessage(userId, text) {
   }
 }
 
-// Функция для отправки сообщения в Botpress Cloud (с созданием conversation)
+// Функция для отправки сообщения в Botpress Cloud через Webchat API
 async function sendToBotpress(userId, text) {
-  const conversationId = `user-${userId}`;
-  
-  console.log('🤖 Пробуем отправить сообщение в Botpress...');
+  console.log('🤖 Отправляем сообщение в Botpress через Webchat API...');
   console.log(`   Bot ID: ${BOTPRESS_BOT_ID}`);
   console.log(`   User ID: ${userId}`);
-  console.log(`   Conversation ID: ${conversationId}`);
   
-  // ШАГ 1: Создаём или получаем conversation
-  console.log(' Шаг 1: Создаём conversation...');
-  let conversationCreated = false;
+  // ПРАВИЛЬНЫЙ URL: https://webchat.botpress.cloud/{BOT_ID}/webchat/{USER_ID}/messages
+  const messageUrl = `${BOTPRESS_WEBCHAT_URL}/webchat/${userId}/messages`;
+  
+  console.log(`   URL: ${messageUrl}`);
   
   try {
-    const createConvResponse = await fetch(`${BOTPRESS_API_BASE}/conversations`, {
+    const response = await fetch(messageUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
-      },
-      body: JSON.stringify({
-        id: conversationId
-      })
-    });
-    
-    console.log(`   Create conversation status: ${createConvResponse.status}`);
-    
-    if (createConvResponse.ok || createConvResponse.status === 409) {
-      // 200 = создан, 409 = уже существует
-      conversationCreated = true;
-      console.log('   ✅ Conversation готов');
-    } else {
-      const errorText = await createConvResponse.text();
-      console.log(`   ⚠️ Не удалось создать conversation: ${errorText}`);
-    }
-  } catch (err) {
-    console.log(`   ⚠️ Ошибка при создании conversation: ${err.message}`);
-  }
-  
-  // ШАГ 2: Отправляем сообщение в conversation
-  console.log('💬 Шаг 2: Отправляем сообщение...');
-  
-  try {
-    const messageResponse = await fetch(`${BOTPRESS_API_BASE}/conversations/${conversationId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
+        'Authorization': `Bearer ${BOTPRESS_API_KEY}`,
+        'X-User-Key': BOTPRESS_API_KEY
       },
       body: JSON.stringify({
         type: 'text',
@@ -101,72 +70,33 @@ async function sendToBotpress(userId, text) {
       })
     });
     
-    console.log(`   Send message status: ${messageResponse.status}`);
+    console.log(`   Response status: ${response.status}`);
     
-    if (messageResponse.ok) {
-      const responseData = await messageResponse.json();
-      console.log('   ✅ Сообщение отправлено, ответ:', JSON.stringify(responseData, null, 2));
+    if (response.ok) {
+      const data = await response.json();
+      console.log('✅ Botpress ответ:', JSON.stringify(data, null, 2));
       
       // Извлекаем текст ответа
       let replyText = 'Извините, я не понял ваш вопрос.';
       
-      if (responseData.responses && responseData.responses.length > 0) {
-        replyText = responseData.responses[0].text || 
-                    responseData.responses[0].payload || 
-                    'Сообщение получено.';
-      } else if (responseData.output && responseData.output.text) {
-        replyText = responseData.output.text;
-      }
-      
-      return replyText;
-    } else {
-      const errorText = await messageResponse.text();
-      console.log(`    Ошибка при отправке сообщения: ${errorText}`);
-      return null;
-    }
-  } catch (err) {
-    console.log(`   ❌ Ошибка сети: ${err.message}`);
-    return null;
-  }
-}
-
-// Альтернативный метод через Webchat API
-async function sendToBotpressWebchat(userId, text) {
-  console.log('🌐 Пробуем Webchat API...');
-  
-  try {
-    const response = await fetch(`${BOTPRESS_WEBCHAT_BASE}/webchat/${userId}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
-      },
-      body: JSON.stringify({
-        type: 'text',
-        text: text
-      })
-    });
-    
-    console.log(`   Webchat response status: ${response.status}`);
-    
-    if (response.ok) {
-      const data = await response.json();
-      console.log('   ✅ Webchat ответ:', JSON.stringify(data, null, 2));
-      
-      let replyText = 'Извините, я не понял ваш вопрос.';
-      
       if (data.responses && data.responses.length > 0) {
-        replyText = data.responses[0].text || data.responses[0].payload;
+        replyText = data.responses[0].text || 
+                    data.responses[0].payload || 
+                    'Сообщение получено.';
+      } else if (data.output && data.output.text) {
+        replyText = data.output.text;
+      } else if (data.message) {
+        replyText = data.message;
       }
       
       return replyText;
     } else {
       const errorText = await response.text();
-      console.log(`   ❌ Webchat ошибка: ${errorText}`);
+      console.error(`❌ Ошибка Botpress (${response.status}):`, errorText);
       return null;
     }
   } catch (err) {
-    console.log(`   ❌ Webchat ошибка сети: ${err.message}`);
+    console.error('❌ Ошибка сети при запросе к Botpress:', err.message);
     return null;
   }
 }
@@ -193,25 +123,18 @@ app.post('/webhook', async (req, res) => {
     console.log('='.repeat(50));
 
     try {
-      // Пробуем основной метод (через conversations API)
-      let replyText = await sendToBotpress(userId, text);
+      // Отправляем сообщение в Botpress
+      const replyText = await sendToBotpress(userId, text);
       
-      // Если не сработало, пробуем webchat API
+      // Если Botpress не ответил, используем fallback
       if (!replyText) {
-        console.log('\n⚠️ Основной метод не сработал, пробуем Webchat API...');
-        replyText = await sendToBotpressWebchat(userId, text);
+        console.log('\n️ Botpress не ответил, используем тестовый ответ');
+        const fallbackText = `Вы написали: "${text}" (Botpress временно недоступен)`;
+        await sendVkMessage(userId, fallbackText);
+      } else {
+        console.log(`\n🤖 Ответ для пользователя: "${replyText}"`);
+        await sendVkMessage(userId, replyText);
       }
-      
-      // Если оба метода не сработали, отправляем тестовый ответ
-      if (!replyText) {
-        console.log('\n⚠️ Оба метода не сработали, используем тестовый ответ');
-        replyText = `Вы написали: "${text}" (Botpress временно недоступен)`;
-      }
-
-      console.log(`\n🤖 Финальный ответ для пользователя: "${replyText}"`);
-      
-      // Отправляем ответ пользователю через ВК
-      await sendVkMessage(userId, replyText);
 
     } catch (error) {
       console.error('❌ КРИТИЧЕСКАЯ ОШИБКА:', error.message);
@@ -240,6 +163,7 @@ app.listen(PORT, () => {
   console.log('🚀 VK-Botpress Bridge Server Started!');
   console.log(`📍 Port: ${PORT}`);
   console.log(`🤖 Bot ID: ${BOTPRESS_BOT_ID}`);
+  console.log(`🔗 Webchat URL: ${BOTPRESS_WEBCHAT_URL}`);
   console.log(`🔗 Webhook URL: https://vk-botpress-bridge.onrender.com/webhook`);
   console.log('===========================================\n');
 });
