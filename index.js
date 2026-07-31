@@ -10,8 +10,11 @@ const VK_TOKEN = process.env.VK_TOKEN;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 
-// Ваш секретный ключ (если хотите его проверять, раскомментируйте)
-// const VK_SECRET_KEY = process.env.VK_SECRET_KEY; 
+// API ключ Botpress Cloud (найден через DevTools)
+const BOTPRESS_API_KEY = 'eyJhbGciOiJIUzI1NiIsR5cClikpXVCJ9.eyJpCI6InVrZzXJfMDFLWVZOUUZGQVhYVDdQU0ZWME0wMjvc1S00iLCjYpXQjOjE3ODU0ODc2NzB9.cfnunvolA82XNJunqUM2c-3l0XhNTFPuPYiY4pGGHxs';
+
+// URL для Botpress Cloud API
+const BOTPRESS_API_URL = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}/conversations`;
 
 // Функция для отправки сообщений обратно в ВКонтакте
 async function sendVkMessage(userId, text) {
@@ -60,44 +63,63 @@ app.post('/webhook', async (req, res) => {
     // Извлекаем данные пользователя и текст
     const userId = body.object.message.from_id;
     const text = body.object.message.text || '';
-    const peerId = body.object.message.peer_id; // ID чата/пользователя
+    const peerId = body.object.message.peer_id;
 
     console.log(`📩 Новое сообщение от ${userId}: "${text}"`);
 
-    // --- ЗАПРОС К BOTPRESS ---
+    // --- ЗАПРОС К BOTPRESS CLOUD ---
     try {
-      // ВАЖНО: Убедитесь, что адрес Botpress правильный!
-      // Если Botpress запущен локально, это не сработает. Если на облаке - укажите URL.
-      // Ниже пример заглушки. Замените URL на ваш реальный endpoint Botpress.
-      
-      // const botpressResponse = await fetch('https://ваш-ботпресс-сервер.com/api/v1/bots/...', {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ text: text, userId: String(userId) })
-      // });
-      // const botpressData = await botpressResponse.json();
-      // const replyText = botpressData.responses[0].text; // или как у вас структура
+      // Отправляем сообщение в Botpress Cloud
+      const botpressResponse = await fetch(`${BOTPRESS_API_URL}/default/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${BOTPRESS_API_KEY}`
+        },
+        body: JSON.stringify({
+          type: 'text',
+          text: text
+        })
+      });
 
-      // --- ВРЕМЕННЫЙ ТЕСТОВЫЙ ОТВЕТ, ЧТОБЫ ПРОВЕРИТЬ РАБОТУ ВК ---
-      // Уберите этот блок, когда наладите связь с Botpress
-      let replyText = `Вы написали: "${text}" (Тестовый ответ, Botpress не подключен)`;
-      if (text.toLowerCase() === 'да' || text.toLowerCase() === 'привет') {
-        replyText = 'Привет! Я работаю. Начинаем анкетирование!';
+      console.log('Botpress response status:', botpressResponse.status);
+
+      if (botpressResponse.ok) {
+        const botpressData = await botpressResponse.json();
+        console.log('Botpress response data:', JSON.stringify(botpressData));
+        
+        // Извлекаем ответ от Botpress
+        let replyText = 'Извините, я не понял ваш вопрос.';
+        
+        if (botpressData.responses && botpressData.responses.length > 0) {
+          // Берём первый текстовый ответ
+          replyText = botpressData.responses[0].text || 
+                      botpressData.responses[0].payload || 
+                      'Сообщение получено.';
+        }
+
+        console.log('🤖 Ответ от Botpress:', replyText);
+        
+        // Отправляем ответ пользователю через ВК
+        await sendVkMessage(userId, replyText);
+      } else {
+        // Если Botpress вернул ошибку
+        const errorText = await botpressResponse.text();
+        console.error(`❌ Ошибка от Botpress (${botpressResponse.status}):`, errorText);
+        await sendVkMessage(userId, `Извините, произошла ошибка связи с ботом (код: ${botpressResponse.status}).`);
       }
-
-      // Отправляем ответ пользователю через ВК
-      await sendVkMessage(userId, replyText);
 
     } catch (error) {
       // СЮДА ВЫВОДИТСЯ ОШИБКА, КОТОРУЮ ВЫ УВИДИТЕ В ЛОГАХ RENDER
-      console.error('❌ КРИТИЧЕСКАЯ ОШИБКА В ОБРАБОТЧИКЕ:', error.message);
+      console.error(' КРИТИЧЕСКАЯ ОШИБКА В ОБРАБОТЧИКЕ:', error.message);
+      console.error('Stack trace:', error.stack);
       
-      // Можно отправить пользователю сообщение об ошибке, чтобы он знал
+      // Отправляем пользователю сообщение об ошибке
       await sendVkMessage(userId, 'Извините, произошла техническая ошибка при обработке запроса.');
     }
   }
 
-  // 3. Обязательный ответ серверу ВК "OK" (иначе ВК будет долбить повторными запросами)
+  // 3. Обязательный ответ серверу ВК "OK"
   res.send('ok');
 });
 
@@ -110,4 +132,5 @@ app.get('/webhook', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Bot ID: ${BOTPRESS_BOT_ID}`);
 });
