@@ -13,8 +13,7 @@ const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === ИСПРАВЛЕННЫЙ URL ДЛЯ BOTPRESS CLOUD CHAT API ===
-// Правильный адрес для чата: https://chat.botpress.cloud/api/v1/bots/ID/converse/
+// === URL ДЛЯ BOTPRESS CLOUD ===
 const BOTPRESS_CONVERSE_BASE = `https://chat.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
 
 // === Вспомогательная функция логирования ===
@@ -108,18 +107,31 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    // Пробуем достать текст ответа
+    console.log('📦 Parsed Botpress JSON (ВСЯ СТРУКТУРА):', JSON.stringify(data, null, 2));
+
+    // ============================================================
+    // НОВАЯ ЛОГИКА ПОИСКА ОТВЕТА (адаптированная под Workflows)
+    // ============================================================
     let reply = null;
-    if (Array.isArray(data.responses) && data.responses.length > 0) {
-      const r = data.responses[0];
-      reply = r.text || (r.payload && r.payload.text) || r.payload;
-    } else if (data.output && data.output.text) {
+
+    // 1. Ищем в стандартном поле output.text (старый формат)
+    if (data.output && data.output.text) {
       reply = data.output.text;
+    } 
+    // 2. Ищем в новом поле body.text (Workflows)
+    else if (data.body && data.body.text) {
+      reply = data.body.text;
+    }
+    // 3. Если ничего нет, смотрим массив body (иногда бывает массив)
+    else if (Array.isArray(data.body) && data.body.length > 0) {
+        const firstElement = data.body[0];
+        if (firstElement.text) reply = firstElement.text;
     }
 
     if (!reply) {
-      console.log('⚠️ Botpress не вернул текст ответа.');
-      reply = 'Извините, я не смог сформировать ответ.';
+      console.log('⚠️ Botpress вернул ответ, но я не могу найти поле "text" в его структуре.');
+      console.log('❗ Чтобы исправить это, скопируйте строку выше "Parsed Botpress JSON" и пришлите её мне.');
+      reply = 'Извините, я не смог сформировать ответ (ошибка парсинга).';
     }
 
     return reply;
@@ -137,7 +149,6 @@ app.post('/webhook', async (req, res) => {
   if (body.type === 'confirmation') {
     console.log('🔐 Запрос подтверждения от ВК');
     
-    // Проверка секрета (если он задан)
     if (VK_SECRET && body.secret && body.secret !== VK_SECRET) {
       console.error('❌ Секретный ключ не совпадает!');
       res.status(403).type('text/plain').send('secret mismatch');
@@ -163,7 +174,6 @@ app.post('/webhook', async (req, res) => {
 
     let replyText = await sendToBotpress(userId, text);
 
-    // Если ответа от Botpress нет, отправляем вежливый отказ
     if (!replyText) {
       console.log('⚠️ Botpress не дал ответа');
       replyText = 'Извините, я временно не могу обработать ваш запрос.';
