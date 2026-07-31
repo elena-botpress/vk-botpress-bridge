@@ -1,7 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = require('node-fetch');
-const crypto = require('crypto'); // Подключаем модуль для генерации ID
+const crypto = require('crypto');
 
 const app = express();
 app.use(bodyParser.json());
@@ -12,8 +12,10 @@ const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === URL ДЛЯ BOTPRESS API ===
-const BOTPRESS_API_URL = 'https://api.botpress.cloud/v1/chat/messages';
+// === Базовые URL для API Botpress ===
+const BOTPRESS_BASE_URL = 'https://api.botpress.cloud/v1';
+const BOTPRESS_CONVERSATIONS_URL = `${BOTPRESS_BASE_URL}/chat/conversations`;
+const BOTPRESS_MESSAGES_URL = `${BOTPRESS_BASE_URL}/chat/messages`;
 
 function logEnv() {
   console.log('=== ENV CHECK ===');
@@ -24,9 +26,7 @@ function logEnv() {
   console.log('==================');
 }
 
-// Функция для генерации длинного ID для Botpress
 function generateBotpressId(vkId) {
-  // Создаем хеш из VK ID, чтобы он всегда был одинаковым для одного пользователя (длина 32 символа)
   return crypto.createHash('md5').update(String(vkId)).digest('hex');
 }
 
@@ -65,15 +65,40 @@ async function sendToBotpress(userId, text) {
   }
 
   try {
-    // Генерируем длинный ID, который точно подойдет Botpress
     const bpUserId = generateBotpressId(userId);
     const bpConversationId = generateBotpressId(userId);
 
-    console.log(`🤖 API Botpress (v1): POST ${BOTPRESS_API_URL}`);
-    console.log(`   Текст: "${text}"`);
-    console.log(`   ID для Botpress: ${bpUserId}`);
+    console.log(`\n--- Попытка отправить в Botpress ---`);
+    console.log(`ID пользователя (BP): ${bpUserId}`);
+    console.log(`ID беседы (BP): ${bpConversationId}`);
 
-    const res = await fetch(BOTPRESS_API_URL, {
+    // ШАГ 1: Создаем беседу (Conversation), если её нет
+    const convRes = await fetch(BOTPRESS_CONVERSATIONS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
+      },
+      body: JSON.stringify({
+        userId: bpUserId,
+        conversationId: bpConversationId
+      })
+    });
+
+    const convRaw = await convRes.text();
+    console.log(`Статус создания беседы: ${convRes.status}`);
+    console.log(`Ответ создания беседы: ${convRaw}`);
+
+    // Если беседа не создалась и не вернула 200/201, выходим
+    if (!convRes.ok && convRes.status !== 200 && convRes.status !== 201) {
+       console.error('❌ Не удалось создать/найти беседу. Останавливаемся.');
+       return null; 
+    }
+
+    // ШАГ 2: Отправляем сообщение в эту беседу
+    console.log(`   Отправка текста: "${text}"`);
+
+    const msgRes = await fetch(BOTPRESS_MESSAGES_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -83,21 +108,23 @@ async function sendToBotpress(userId, text) {
         userId: bpUserId,
         conversationId: bpConversationId,
         type: 'text',
-        tags: {}, // Добавляем пустые теги, чтобы убрать ошибку
+        tags: {},
         payload: {
           text: text
         }
       })
     });
 
-    const raw = await res.text();
-    console.log(`   Статус: ${res.status}`);
+    const raw = await msgRes.text();
+    console.log(`   Статус отправки сообщения: ${msgRes.status}`);
+    console.log('   RAW Botpress response:', raw);
 
-    if (!res.ok) {
-      console.error('⚠️ Ошибка API Botpress:', raw);
+    if (!msgRes.ok) {
+      console.error('⚠️ Ошибка отправки сообщения:', raw);
       return null;
     }
 
+    // ШАГ 3: Проверяем ответ от Botpress
     let data;
     try {
       data = JSON.parse(raw);
@@ -106,8 +133,9 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    console.log('📦 Ответ Botpress:', JSON.stringify(data, null, 2));
+    console.log('📦 Ответ от Botpress (полный):', JSON.stringify(data, null, 2));
 
+    // Пытаемся найти ответ
     let reply = null;
     if (data.body && data.body.text) {
       reply = data.body.text;
@@ -143,7 +171,6 @@ app.post('/webhook', async (req, res) => {
 
     if (!replyText) {
       console.log('⚠️ Botpress не дал ответа.');
-      // Меняем запасной ответ на более дружелюбный
       replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Добро пожаловать!';
     }
 
