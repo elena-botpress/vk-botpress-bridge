@@ -1,6 +1,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = require('node-fetch');
+const crypto = require('crypto'); // Подключаем модуль для генерации ID
 
 const app = express();
 app.use(bodyParser.json());
@@ -11,7 +12,7 @@ const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === НОВЫЙ URL ДЛЯ BOTPRESS API ===
+// === URL ДЛЯ BOTPRESS API ===
 const BOTPRESS_API_URL = 'https://api.botpress.cloud/v1/chat/messages';
 
 function logEnv() {
@@ -21,6 +22,12 @@ function logEnv() {
   console.log('VK_SECRET set:', !!VK_SECRET);
   console.log('BOTPRESS_API_KEY set:', !!BOTPRESS_API_KEY);
   console.log('==================');
+}
+
+// Функция для генерации длинного ID для Botpress
+function generateBotpressId(vkId) {
+  // Создаем хеш из VK ID, чтобы он всегда был одинаковым для одного пользователя (длина 32 символа)
+  return crypto.createHash('md5').update(String(vkId)).digest('hex');
 }
 
 async function sendToVk(userId, text) {
@@ -58,14 +65,13 @@ async function sendToBotpress(userId, text) {
   }
 
   try {
-    // === ВАЖНОЕ ИЗМЕНЕНИЕ: Генерируем длинные ID для Botpress ===
-    // Botpress требует ID длиной минимум 28 символов. 
-    // Мы просто добавим префикс "vk_" к ID пользователя ВК.
-    const bpUserId = `vk_${userId}`; 
+    // Генерируем длинный ID, который точно подойдет Botpress
+    const bpUserId = generateBotpressId(userId);
+    const bpConversationId = generateBotpressId(userId);
 
     console.log(`🤖 API Botpress (v1): POST ${BOTPRESS_API_URL}`);
     console.log(`   Текст: "${text}"`);
-    console.log(`   Пользователь (для BP): ${bpUserId}`);
+    console.log(`   ID для Botpress: ${bpUserId}`);
 
     const res = await fetch(BOTPRESS_API_URL, {
       method: 'POST',
@@ -75,9 +81,9 @@ async function sendToBotpress(userId, text) {
       },
       body: JSON.stringify({
         userId: bpUserId,
-        conversationId: bpUserId,
-        // Теперь передаем payload и type, как требует API
+        conversationId: bpConversationId,
         type: 'text',
+        tags: {}, // Добавляем пустые теги, чтобы убрать ошибку
         payload: {
           text: text
         }
@@ -102,7 +108,6 @@ async function sendToBotpress(userId, text) {
 
     console.log('📦 Ответ Botpress:', JSON.stringify(data, null, 2));
 
-    // Ищем текст в ответе
     let reply = null;
     if (data.body && data.body.text) {
       reply = data.body.text;
@@ -138,7 +143,8 @@ app.post('/webhook', async (req, res) => {
 
     if (!replyText) {
       console.log('⚠️ Botpress не дал ответа.');
-      replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Пожалуйста, подождите, я настраиваюсь.';
+      // Меняем запасной ответ на более дружелюбный
+      replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Добро пожаловать!';
     }
 
     console.log(`🤖 Отправляю пользователю: "${replyText}"`);
