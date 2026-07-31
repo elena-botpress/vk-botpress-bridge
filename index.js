@@ -11,7 +11,7 @@ const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === КОНЕЧНЫЙ URL ДЛЯ СВЯЗИ С BOTPRESS (НЕ ИСПОЛЬЗУЕТ ВЕБХУК) ===
+// === НОВЫЙ URL ДЛЯ BOTPRESS API ===
 const BOTPRESS_API_URL = 'https://api.botpress.cloud/v1/chat/messages';
 
 function logEnv() {
@@ -58,8 +58,14 @@ async function sendToBotpress(userId, text) {
   }
 
   try {
+    // === ВАЖНОЕ ИЗМЕНЕНИЕ: Генерируем длинные ID для Botpress ===
+    // Botpress требует ID длиной минимум 28 символов. 
+    // Мы просто добавим префикс "vk_" к ID пользователя ВК.
+    const bpUserId = `vk_${userId}`; 
+
     console.log(`🤖 API Botpress (v1): POST ${BOTPRESS_API_URL}`);
     console.log(`   Текст: "${text}"`);
+    console.log(`   Пользователь (для BP): ${bpUserId}`);
 
     const res = await fetch(BOTPRESS_API_URL, {
       method: 'POST',
@@ -68,9 +74,13 @@ async function sendToBotpress(userId, text) {
         'Authorization': `Bearer ${BOTPRESS_API_KEY}`
       },
       body: JSON.stringify({
-        userId: String(userId),
-        conversationId: String(userId),
-        text: text
+        userId: bpUserId,
+        conversationId: bpUserId,
+        // Теперь передаем payload и type, как требует API
+        type: 'text',
+        payload: {
+          text: text
+        }
       })
     });
 
@@ -92,7 +102,7 @@ async function sendToBotpress(userId, text) {
 
     console.log('📦 Ответ Botpress:', JSON.stringify(data, null, 2));
 
-    // Поиск ответа
+    // Ищем текст в ответе
     let reply = null;
     if (data.body && data.body.text) {
       reply = data.body.text;
