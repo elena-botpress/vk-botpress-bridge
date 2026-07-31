@@ -6,14 +6,26 @@ const app = express();
 app.use(bodyParser.json());
 
 // === Переменные окружения (обязательно задать в Render) ===
-const VK_TOKEN = process.env.VK_TOKEN;                  // токен сообщества ВК
-const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE; // код подтверждения из настроек Callback API
-const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;    // Bot ID из Botpress Cloud
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;  // API key Botpress (НЕ хардкодить)
+const VK_TOKEN = process.env.VK_TOKEN;                      // токен сообщества ВК
+const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE; // строка из поля "Строка, которую должен вернуть сервер" (4e76153d)
+const VK_SECRET = process.env.VK_SECRET;                    // секретный ключ из поля "Секретный ключ" (aaQ13axAPQEcczQa)
 
-// Базовый URL Converse API Botpress Cloud
-// см. документацию Botpress: /api/v1/bots/{botId}/converse/{userId} [20][28]
+const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;        // Bot ID из Botpress Cloud
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;      // API key Botpress
+
+// Базовый URL Converse API Botpress Cloud [20][28]
 const BOTPRESS_CONVERSE_BASE = `https://api.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
+
+// === Вспомогательная функция логирования переменных окружения ===
+function logEnv() {
+  console.log('=== ENV CHECK ===');
+  console.log('VK_TOKEN set:', !!VK_TOKEN);
+  console.log('VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
+  console.log('VK_SECRET set:', !!VK_SECRET);
+  console.log('BOTPRESS_BOT_ID:', BOTPRESS_BOT_ID);
+  console.log('BOTPRESS_API_KEY set:', !!BOTPRESS_API_KEY);
+  console.log('==================');
+}
 
 // === Отправка сообщения пользователю ВК ===
 async function sendToVk(userId, text) {
@@ -32,8 +44,11 @@ async function sendToVk(userId, text) {
   });
 
   try {
+    console.log(`➡️ VK API: ${url}?${params.toString()}`);
     const res = await fetch(`${url}?${params.toString()}`);
     const data = await res.json();
+
+    console.log('⬅️ VK response:', JSON.stringify(data));
 
     if (data.error) {
       console.error('❌ Ошибка ВК:', data.error);
@@ -79,7 +94,7 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    // Пробуем достать текст ответа из стандартных полей Botpress [28][27]
+    // Пробуем достать текст ответа из стандартных полей Botpress [27][28]
     let reply = null;
 
     if (Array.isArray(data.responses) && data.responses.length > 0) {
@@ -108,9 +123,28 @@ app.post('/webhook', async (req, res) => {
   // 1) Подтверждение адреса
   if (body.type === 'confirmation') {
     console.log('🔐 Запрос подтверждения от ВК');
-    console.log('   Ожидаемый код подтверждения:', VK_CONFIRMATION_CODE);
 
-    // ВК ожидает в ответе СТРОГО этот код, без JSON, без лишнего текста [11][13]
+    const receivedSecret = body.secret;
+    console.log('   Полученный secret:', receivedSecret);
+    console.log('   Ожидаемый VK_SECRET:', VK_SECRET);
+    console.log('   Ожидаемый VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
+
+    // Если вы хотите проверять секретный ключ:
+    if (VK_SECRET && receivedSecret && receivedSecret !== VK_SECRET) {
+      console.error('❌ Секретный ключ не совпадает! Подтверждение отклонено.');
+      // Важно: если вернуть не тот текст, ВК не подтвердит сервер.
+      // Но для диагностики можно временно вернуть ошибку:
+      res.status(403).type('text/plain').send('secret mismatch');
+      return;
+    }
+
+    if (!VK_CONFIRMATION_CODE) {
+      console.error('❌ VK_CONFIRMATION_CODE не задан в переменных окружения!');
+      res.status(500).type('text/plain').send('confirmation code not set');
+      return;
+    }
+
+    // ВК ожидает СТРОГО эту строку, без JSON и лишнего текста [11][13]
     res.status(200).type('text/plain').send(VK_CONFIRMATION_CODE);
     return;
   }
@@ -149,11 +183,12 @@ app.get('/webhook', (req, res) => {
 });
 
 app.get('/', (req, res) => {
+  logEnv();
   res.send('Server is alive! 🚀');
 });
 
-// Запуск сервера
-const PORT = process.env.PORT || 3000;
+// Запуск сервера — Render сам задаёт порт через переменную окружения PORT [8][15]
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
   console.log('🚀 Сервер запущен!');
@@ -161,4 +196,5 @@ app.listen(PORT, () => {
   console.log(`🤖 Bot ID: ${BOTPRESS_BOT_ID}`);
   console.log(`🔐 Ожидаемый код подтверждения: ${VK_CONFIRMATION_CODE}`);
   console.log('===========================================\n');
+  logEnv();
 });
