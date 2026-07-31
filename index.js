@@ -72,7 +72,9 @@ async function sendToBotpress(userId, text) {
     console.log(`ID пользователя (BP): ${bpUserId}`);
     console.log(`ID беседы (BP): ${bpConversationId}`);
 
-    // ШАГ 1: Создаем беседу (Conversation), если её нет
+    // ========================================================
+    // ШАГ 1: Создаем беседу с channel="web"
+    // ========================================================
     const convRes = await fetch(BOTPRESS_CONVERSATIONS_URL, {
       method: 'POST',
       headers: {
@@ -81,7 +83,9 @@ async function sendToBotpress(userId, text) {
       },
       body: JSON.stringify({
         userId: bpUserId,
-        conversationId: bpConversationId
+        conversationId: bpConversationId,
+        channel: 'web', // ОБЯЗАТЕЛЬНОЕ поле для этого API
+        tags: {}        // ОБЯЗАТЕЛЬНОЕ поле
       })
     });
 
@@ -89,13 +93,14 @@ async function sendToBotpress(userId, text) {
     console.log(`Статус создания беседы: ${convRes.status}`);
     console.log(`Ответ создания беседы: ${convRaw}`);
 
-    // Если беседа не создалась и не вернула 200/201, выходим
     if (!convRes.ok && convRes.status !== 200 && convRes.status !== 201) {
-       console.error('❌ Не удалось создать/найти беседу. Останавливаемся.');
+       console.error('❌ Не удалось создать беседу.');
        return null; 
     }
 
+    // ========================================================
     // ШАГ 2: Отправляем сообщение в эту беседу
+    // ========================================================
     console.log(`   Отправка текста: "${text}"`);
 
     const msgRes = await fetch(BOTPRESS_MESSAGES_URL, {
@@ -124,7 +129,9 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    // ШАГ 3: Проверяем ответ от Botpress
+    // ========================================================
+    // ШАГ 3: Получаем и парсим ответ
+    // ========================================================
     let data;
     try {
       data = JSON.parse(raw);
@@ -135,7 +142,6 @@ async function sendToBotpress(userId, text) {
 
     console.log('📦 Ответ от Botpress (полный):', JSON.stringify(data, null, 2));
 
-    // Пытаемся найти ответ
     let reply = null;
     if (data.body && data.body.text) {
       reply = data.body.text;
