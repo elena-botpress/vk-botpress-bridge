@@ -5,13 +5,7 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(bodyParser.json());
 
-// === Переменные окружения (обязательно задать в Render) ===
-// VK_TOKEN — токен сообщества ВК (ключ доступа)
-// VK_CONFIRMATION_CODE — строка из поля "Строка, которую должен вернуть сервер" (например, 4e76153d)
-// VK_SECRET — секретный ключ из поля "Секретный ключ" (можно оставить пустым, тогда проверка не используется)
-// BOTPRESS_BOT_ID — Bot ID из Botpress Cloud
-// BOTPRESS_API_KEY — API key Botpress
-
+// === Переменные окружения ===
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
@@ -19,10 +13,11 @@ const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// Базовый URL Converse API Botpress Cloud [20][28]
-const BOTPRESS_CONVERSE_BASE = `https://api.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
+// === ИСПРАВЛЕННЫЙ URL ДЛЯ BOTPRESS CLOUD CHAT API ===
+// Правильный адрес для чата: https://chat.botpress.cloud/api/v1/bots/ID/converse/
+const BOTPRESS_CONVERSE_BASE = `https://chat.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
 
-// === Вспомогательная функция логирования переменных окружения ===
+// === Вспомогательная функция логирования ===
 function logEnv() {
   console.log('=== ENV CHECK ===');
   console.log('VK_TOKEN set:', !!VK_TOKEN);
@@ -75,7 +70,6 @@ async function sendToBotpress(userId, text) {
 
   try {
     const url = `${BOTPRESS_CONVERSE_BASE}/converse/${userId}`;
-
     console.log(`🤖 Converse API: POST ${url}`);
     console.log(`   Текст: "${text}"`);
 
@@ -95,7 +89,6 @@ async function sendToBotpress(userId, text) {
     console.log(`   Статус Botpress: ${res.status}`);
     console.log('   RAW Botpress response:', raw);
 
-    // Если статус не OK — логируем и выходим
     if (!res.ok) {
       console.error('⚠️ Ошибка Botpress:', res.status, raw);
       return null;
@@ -103,7 +96,6 @@ async function sendToBotpress(userId, text) {
 
     let data;
     try {
-      // Пытаемся распарсить JSON только если ответ похож на JSON [20][27]
       const trimmed = raw.trim();
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         data = JSON.parse(trimmed);
@@ -116,11 +108,8 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    console.log('   Parsed Botpress JSON:', JSON.stringify(data));
-
-    // Пробуем достать текст ответа из стандартных полей Botpress [27][28]
+    // Пробуем достать текст ответа
     let reply = null;
-
     if (Array.isArray(data.responses) && data.responses.length > 0) {
       const r = data.responses[0];
       reply = r.text || (r.payload && r.payload.text) || r.payload;
@@ -145,20 +134,12 @@ app.post('/webhook', async (req, res) => {
   const body = req.body;
   console.log('📨 Webhook:', JSON.stringify(body));
 
-  // 1) Подтверждение адреса
   if (body.type === 'confirmation') {
     console.log('🔐 Запрос подтверждения от ВК');
-
-    const receivedSecret = body.secret;
-    console.log('   Полученный secret:', receivedSecret);
-    console.log('   Ожидаемый VK_SECRET:', VK_SECRET);
-    console.log('   Ожидаемый VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
-
-    // Проверка секрета — по желанию. Если VK_SECRET не задан, проверка не выполняется.
-    if (VK_SECRET && receivedSecret && receivedSecret !== VK_SECRET) {
-      console.error('❌ Секретный ключ не совпадает! Подтверждение отклонено.');
-      // Для production лучше сразу возвращать VK_CONFIRMATION_CODE,
-      // но для жёсткой безопасности можно так.
+    
+    // Проверка секрета (если он задан)
+    if (VK_SECRET && body.secret && body.secret !== VK_SECRET) {
+      console.error('❌ Секретный ключ не совпадает!');
       res.status(403).type('text/plain').send('secret mismatch');
       return;
     }
@@ -169,12 +150,10 @@ app.post('/webhook', async (req, res) => {
       return;
     }
 
-    // ВК ожидает СТРОГО эту строку, без JSON и лишнего текста [11][13]
     res.status(200).type('text/plain').send(VK_CONFIRMATION_CODE);
     return;
   }
 
-  // 2) Новое сообщение
   if (body.type === 'message_new') {
     const message = body.object?.message || {};
     const userId = message.from_id;
@@ -182,27 +161,21 @@ app.post('/webhook', async (req, res) => {
 
     console.log(`\n💬 Сообщение от ${userId}: "${text}"`);
 
-    try {
-      let replyText = await sendToBotpress(userId, text);
+    let replyText = await sendToBotpress(userId, text);
 
-      if (!replyText) {
-        console.log('⚠️ Botpress не дал ответа, использую запасной вариант');
-        replyText = `Вы написали: "${text}". (Botpress временно недоступен)`;
-      }
-
-      console.log(`🤖 Отправляю пользователю: "${replyText}"`);
-      await sendToVk(userId, replyText);
-    } catch (error) {
-      console.error('❌ Критическая ошибка при обработке сообщения:', error.message);
-      await sendToVk(userId, 'Произошла техническая ошибка.');
+    // Если ответа от Botpress нет, отправляем вежливый отказ
+    if (!replyText) {
+      console.log('⚠️ Botpress не дал ответа');
+      replyText = 'Извините, я временно не могу обработать ваш запрос.';
     }
+
+    console.log(`🤖 Отправляю пользователю: "${replyText}"`);
+    await sendToVk(userId, replyText);
   }
 
-  // ВК ожидает 'ok' в теле ответа для любых событий
   res.status(200).send('ok');
 });
 
-// Простой GET для проверки, что сервис жив
 app.get('/webhook', (req, res) => {
   res.send('VK-Botpress bridge is running!');
 });
@@ -212,14 +185,13 @@ app.get('/', (req, res) => {
   res.send('Server is alive! 🚀');
 });
 
-// Запуск сервера — Render сам задаёт порт через переменную окружения PORT [8][15]
+// Запуск сервера
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
   console.log('🚀 Сервер запущен!');
   console.log(`📍 Порт: ${PORT}`);
   console.log(`🤖 Bot ID: ${BOTPRESS_BOT_ID}`);
-  console.log(`🔐 Ожидаемый код подтверждения: ${VK_CONFIRMATION_CODE}`);
   console.log('===========================================\n');
   logEnv();
 });
