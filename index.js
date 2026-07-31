@@ -6,12 +6,18 @@ const app = express();
 app.use(bodyParser.json());
 
 // === Переменные окружения (обязательно задать в Render) ===
-const VK_TOKEN = process.env.VK_TOKEN;                      // токен сообщества ВК
-const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE; // строка из поля "Строка, которую должен вернуть сервер" (4e76153d)
-const VK_SECRET = process.env.VK_SECRET;                    // секретный ключ из поля "Секретный ключ" (aaQ13axAPQEcczQa)
+// VK_TOKEN — токен сообщества ВК (ключ доступа)
+// VK_CONFIRMATION_CODE — строка из поля "Строка, которую должен вернуть сервер" (например, 4e76153d)
+// VK_SECRET — секретный ключ из поля "Секретный ключ" (можно оставить пустым, тогда проверка не используется)
+// BOTPRESS_BOT_ID — Bot ID из Botpress Cloud
+// BOTPRESS_API_KEY — API key Botpress
 
-const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;        // Bot ID из Botpress Cloud
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;      // API key Botpress
+const VK_TOKEN = process.env.VK_TOKEN;
+const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
+const VK_SECRET = process.env.VK_SECRET;
+
+const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
 // Базовый URL Converse API Botpress Cloud [20][28]
 const BOTPRESS_CONVERSE_BASE = `https://api.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
@@ -85,26 +91,45 @@ async function sendToBotpress(userId, text) {
       })
     });
 
-    const data = await res.json();
+    const raw = await res.text();
     console.log(`   Статус Botpress: ${res.status}`);
-    console.log('   Ответ Botpress:', JSON.stringify(data));
+    console.log('   RAW Botpress response:', raw);
 
+    // Если статус не OK — логируем и выходим
     if (!res.ok) {
-      console.error('⚠️ Ошибка Botpress:', res.status, JSON.stringify(data));
+      console.error('⚠️ Ошибка Botpress:', res.status, raw);
       return null;
     }
+
+    let data;
+    try {
+      // Пытаемся распарсить JSON только если ответ похож на JSON [20][27]
+      const trimmed = raw.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        data = JSON.parse(trimmed);
+      } else {
+        console.warn('⚠️ Ответ Botpress не в JSON-формате, не могу распарсить.');
+        return null;
+      }
+    } catch (e) {
+      console.error('❌ Ошибка парсинга JSON Botpress:', e.message);
+      return null;
+    }
+
+    console.log('   Parsed Botpress JSON:', JSON.stringify(data));
 
     // Пробуем достать текст ответа из стандартных полей Botpress [27][28]
     let reply = null;
 
     if (Array.isArray(data.responses) && data.responses.length > 0) {
       const r = data.responses[0];
-      reply = r.text || r.payload?.text || r.payload;
+      reply = r.text || (r.payload && r.payload.text) || r.payload;
     } else if (data.output && data.output.text) {
       reply = data.output.text;
     }
 
     if (!reply) {
+      console.log('⚠️ Botpress не вернул текст ответа.');
       reply = 'Извините, я не смог сформировать ответ.';
     }
 
@@ -129,11 +154,11 @@ app.post('/webhook', async (req, res) => {
     console.log('   Ожидаемый VK_SECRET:', VK_SECRET);
     console.log('   Ожидаемый VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
 
-    // Если вы хотите проверять секретный ключ:
+    // Проверка секрета — по желанию. Если VK_SECRET не задан, проверка не выполняется.
     if (VK_SECRET && receivedSecret && receivedSecret !== VK_SECRET) {
       console.error('❌ Секретный ключ не совпадает! Подтверждение отклонено.');
-      // Важно: если вернуть не тот текст, ВК не подтвердит сервер.
-      // Но для диагностики можно временно вернуть ошибку:
+      // Для production лучше сразу возвращать VK_CONFIRMATION_CODE,
+      // но для жёсткой безопасности можно так.
       res.status(403).type('text/plain').send('secret mismatch');
       return;
     }
