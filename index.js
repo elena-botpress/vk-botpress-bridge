@@ -98,10 +98,20 @@ app.post('/webhook', async (req, res) => {
 
   // 2. ПОДТВЕРЖДЕНИЕ СЕРВЕРА (максимально чистый ответ, как требует ВК)
   if (body.type === 'confirmation') {
-    console.log('🔐 ВК запрашивает подтверждение. Отправляю код:', VK_CONFIRMATION_CODE);
-    // Важно: отправляем ТОЛЬКО текст, без лишнего JSON или заголовков
-    res.status(200).type('text/plain').send(VK_CONFIRMATION_CODE);
-    return;
+  console.log('🔐 ВК запрашивает подтверждение');
+  console.log('   Код подтверждения:', VK_CONFIRMATION_CODE);
+  console.log('   Отправляю ответ...');
+  
+  // Отправляем максимально простой ответ
+  res.writeHead(200, {
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Content-Length': Buffer.byteLength(VK_CONFIRMATION_CODE)
+  });
+  res.end(VK_CONFIRMATION_CODE);
+  
+  console.log('   ✅ Ответ отправлен');
+  return;
+}
   }
 
   // 3. ВХОДЯЩЕЕ СООБЩЕНИЕ
