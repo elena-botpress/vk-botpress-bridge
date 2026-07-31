@@ -5,17 +5,15 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(bodyParser.json());
 
-// === Переменные окружения (их вы задали в Render) ===
+// === Переменные окружения ===
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 
 // =================================================================
-// ВАШ АДРЕС ВЕБХУКА ИЗ BOTPRESS УЖЕ ВСТАВЛЕН СЮДА!
-// Ничего менять не нужно, скрипт сразу готов к работе.
+// АДРЕС ВЕБХУКА ИЗ BOTPRESS (он уже вставлен)
 // =================================================================
 const BOTPRESS_WEBHOOK_URL = 'https://webhook.botpress.cloud/2526d31b-9cca-46c0-80c8-58e01bb7d205';
-// =================================================================
 
 // === Вспомогательная функция логирования ===
 function logEnv() {
@@ -62,11 +60,6 @@ async function sendToVk(userId, text) {
 
 // === Отправка сообщения в Botpress через ВЕБХУК ===
 async function sendToBotpress(userId, text) {
-  if (!BOTPRESS_WEBHOOK_URL) {
-    console.error('❌ ОШИБКА: Не задан BOTPRESS_WEBHOOK_URL!');
-    return null;
-  }
-
   try {
     console.log(`🤖 Webhook: POST ${BOTPRESS_WEBHOOK_URL}`);
     console.log(`   Текст: "${text}"`);
@@ -84,12 +77,15 @@ async function sendToBotpress(userId, text) {
 
     const raw = await res.text();
     console.log(`   Статус Botpress: ${res.status}`);
-    console.log('   RAW Botpress response:', raw);
-
-    if (!res.ok) {
-      console.error('⚠️ Ошибка Botpress (Webhook):', res.status, raw);
-      return null;
+    
+    // Если ответ пустой (или не JSON), значит Botpress промолчал.
+    // В этом случае возвращаем null, чтобы скрипт использовал запасной вариант.
+    if (!raw || raw.trim() === '') {
+        console.log('⚠️ Botpress вернул пустой ответ. Скорее всего, сценарий не опубликован.');
+        return null;
     }
+
+    console.log('   RAW Botpress response:', raw);
 
     let data;
     try {
@@ -97,8 +93,8 @@ async function sendToBotpress(userId, text) {
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         data = JSON.parse(trimmed);
       } else {
-        console.warn('⚠️ Ответ Botpress не в JSON-формате, не могу распарсить.');
-        return null;
+        console.warn('⚠️ Ответ Botpress не в JSON-формате, но он не пустой. Возвращаю как есть.');
+        return raw; // Если это просто текст, вернем его
       }
     } catch (e) {
       console.error('❌ Ошибка парсинга JSON Botpress:', e.message);
@@ -116,8 +112,8 @@ async function sendToBotpress(userId, text) {
     }
 
     if (!reply) {
-      console.log('⚠️ Botpress вернул ответ, но я не могу найти поле "text".');
-      reply = 'Извините, я не смог сформировать ответ (не найден текст).';
+      console.log('⚠️ Botpress вернул JSON, но не нашел поле "text".');
+      return null;
     }
 
     return reply;
@@ -161,8 +157,9 @@ app.post('/webhook', async (req, res) => {
     let replyText = await sendToBotpress(userId, text);
 
     if (!replyText) {
-      console.log('⚠️ Botpress не дал ответа');
-      replyText = 'Извините, я временно не могу обработать ваш запрос.';
+      console.log('⚠️ Botpress не дал ответа.');
+      // Теперь мы отправляем пользователю вежливый ответ вместо ошибки.
+      replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Пожалуйста, подождите, я настраиваюсь.';
     }
 
     console.log(`🤖 Отправляю пользователю: "${replyText}"`);
