@@ -13,8 +13,9 @@ const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === URL ДЛЯ BOTPRESS CLOUD ===
-const BOTPRESS_CONVERSE_BASE = `https://chat.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}`;
+// === ИСПРАВЛЕННЫЙ URL ДЛЯ НОВОГО ИНТЕРФЕЙСА BOTPRESS (Workflows) ===
+// Мы используем /message вместо /converse. Это ключевое изменение!
+const BOTPRESS_API_URL = `https://chat.botpress.cloud/api/v1/bots/${BOTPRESS_BOT_ID}/message`;
 
 // === Вспомогательная функция логирования ===
 function logEnv() {
@@ -60,7 +61,7 @@ async function sendToVk(userId, text) {
   }
 }
 
-// === Отправка сообщения в Botpress через Converse API ===
+// === Отправка сообщения в Botpress через Message API ===
 async function sendToBotpress(userId, text) {
   if (!BOTPRESS_BOT_ID || !BOTPRESS_API_KEY) {
     console.error('❌ ОШИБКА: Не заданы BOTPRESS_BOT_ID или BOTPRESS_API_KEY');
@@ -68,19 +69,18 @@ async function sendToBotpress(userId, text) {
   }
 
   try {
-    const url = `${BOTPRESS_CONVERSE_BASE}/converse/${userId}`;
-    console.log(`🤖 Converse API: POST ${url}`);
+    console.log(`🤖 Message API: POST ${BOTPRESS_API_URL}`);
     console.log(`   Текст: "${text}"`);
 
-    const res = await fetch(url, {
+    // В новом API мы должны отправлять строго структуру { "text": "..." } 
+    const res = await fetch(BOTPRESS_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${BOTPRESS_API_KEY}`
       },
       body: JSON.stringify({
-        type: 'text',
-        text
+        text: text // Убрали "type", оставили только text
       })
     });
 
@@ -107,31 +107,28 @@ async function sendToBotpress(userId, text) {
       return null;
     }
 
-    console.log('📦 Parsed Botpress JSON (ВСЯ СТРУКТУРА):', JSON.stringify(data, null, 2));
+    console.log('📦 Parsed Botpress JSON:', JSON.stringify(data, null, 2));
 
-    // ============================================================
-    // НОВАЯ ЛОГИКА ПОИСКА ОТВЕТА (адаптированная под Workflows)
-    // ============================================================
+    // === НОВАЯ ЛОГИКА ПОИСКА ОТВЕТА (для Workflows) ===
     let reply = null;
 
-    // 1. Ищем в стандартном поле output.text (старый формат)
-    if (data.output && data.output.text) {
-      reply = data.output.text;
-    } 
-    // 2. Ищем в новом поле body.text (Workflows)
-    else if (data.body && data.body.text) {
+    // 1. Сначала смотрим, есть ли текст в поле body.text (самый частый случай в Workflows)
+    if (data.body && data.body.text) {
       reply = data.body.text;
-    }
-    // 3. Если ничего нет, смотрим массив body (иногда бывает массив)
+    } 
+    // 2. Иногда ответы приходят как массив (если несколько сообщений)
     else if (Array.isArray(data.body) && data.body.length > 0) {
         const firstElement = data.body[0];
         if (firstElement.text) reply = firstElement.text;
     }
+    // 3. Или просто массив объектов, если массив в корне
+    else if (Array.isArray(data) && data.length > 0) {
+        if (data[0].text) reply = data[0].text;
+    }
 
     if (!reply) {
-      console.log('⚠️ Botpress вернул ответ, но я не могу найти поле "text" в его структуре.');
-      console.log('❗ Чтобы исправить это, скопируйте строку выше "Parsed Botpress JSON" и пришлите её мне.');
-      reply = 'Извините, я не смог сформировать ответ (ошибка парсинга).';
+      console.log('⚠️ Botpress вернул ответ, но я не могу найти поле "text".');
+      reply = 'Извините, я не смог сформировать ответ (не найден текст).';
     }
 
     return reply;
