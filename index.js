@@ -1,7 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = require('node-fetch');
-const crypto = require('crypto');
 
 const app = express();
 app.use(bodyParser.json());
@@ -10,26 +9,20 @@ app.use(bodyParser.json());
 const VK_TOKEN = process.env.VK_TOKEN;
 const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 
-// === Базовые URL для API Botpress ===
-const BOTPRESS_BASE_URL = 'https://api.botpress.cloud/v1';
-const BOTPRESS_CONVERSATIONS_URL = `${BOTPRESS_BASE_URL}/chat/conversations`;
-const BOTPRESS_MESSAGES_URL = `${BOTPRESS_BASE_URL}/chat/messages`;
+// === АДРЕС ВЕБХУКА ИЗ ВАШЕГО СКРИНШОТА ===
+const BOTPRESS_WEBHOOK_URL = 'https://webhook.botpress.cloud/2526d31b-9cca-46c0-80c8-58e01bb7d205';
 
 function logEnv() {
   console.log('=== ENV CHECK ===');
   console.log('VK_TOKEN set:', !!VK_TOKEN);
   console.log('VK_CONFIRMATION_CODE:', VK_CONFIRMATION_CODE);
   console.log('VK_SECRET set:', !!VK_SECRET);
-  console.log('BOTPRESS_API_KEY set:', !!BOTPRESS_API_KEY);
+  console.log('BOTPRESS_WEBHOOK_URL:', BOTPRESS_WEBHOOK_URL);
   console.log('==================');
 }
 
-function generateBotpressId(vkId) {
-  return crypto.createHash('md5').update(String(vkId)).digest('hex');
-}
-
+// === Отправка сообщения в ВК ===
 async function sendToVk(userId, text) {
   if (!VK_TOKEN) {
     console.error('❌ ОШИБКА: Не задан VK_TOKEN');
@@ -58,95 +51,56 @@ async function sendToVk(userId, text) {
   }
 }
 
+// === Отправка в Botpress через Webhook ===
 async function sendToBotpress(userId, text) {
-  if (!BOTPRESS_API_KEY) {
-    console.error('❌ ОШИБКА: Не задан BOTPRESS_API_KEY');
-    return null;
-  }
-
   try {
-    const bpUserId = generateBotpressId(userId);
-    const bpConversationId = generateBotpressId(userId);
+    console.log(`\n🤖 Отправка в Botpress Webhook...`);
+    console.log(`   URL: ${BOTPRESS_WEBHOOK_URL}`);
+    console.log(`   User ID: ${userId}`);
+    console.log(`   Текст: "${text}"`);
 
-    console.log(`\n--- Попытка отправить в Botpress ---`);
-    console.log(`ID пользователя (BP): ${bpUserId}`);
-    console.log(`ID беседы (BP): ${bpConversationId}`);
-
-    // ========================================================
-    // ШАГ 1: Создаем беседу с channel="web"
-    // ========================================================
-    const convRes = await fetch(BOTPRESS_CONVERSATIONS_URL, {
+    const res = await fetch(BOTPRESS_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
+        'x-bp-user-id': String(userId) // Ключевой заголовок для сохранения сессии
       },
       body: JSON.stringify({
-        userId: bpUserId,
-        conversationId: bpConversationId,
-        channel: 'web', // ОБЯЗАТЕЛЬНОЕ поле для этого API
-        tags: {}        // ОБЯЗАТЕЛЬНОЕ поле
+        text: text
       })
     });
 
-    const convRaw = await convRes.text();
-    console.log(`Статус создания беседы: ${convRes.status}`);
-    console.log(`Ответ создания беседы: ${convRaw}`);
-
-    if (!convRes.ok && convRes.status !== 200 && convRes.status !== 201) {
-       console.error('❌ Не удалось создать беседу.');
-       return null; 
-    }
-
-    // ========================================================
-    // ШАГ 2: Отправляем сообщение в эту беседу
-    // ========================================================
-    console.log(`   Отправка текста: "${text}"`);
-
-    const msgRes = await fetch(BOTPRESS_MESSAGES_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${BOTPRESS_API_KEY}`
-      },
-      body: JSON.stringify({
-        userId: bpUserId,
-        conversationId: bpConversationId,
-        type: 'text',
-        tags: {},
-        payload: {
-          text: text
-        }
-      })
-    });
-
-    const raw = await msgRes.text();
-    console.log(`   Статус отправки сообщения: ${msgRes.status}`);
-    console.log('   RAW Botpress response:', raw);
-
-    if (!msgRes.ok) {
-      console.error('⚠️ Ошибка отправки сообщения:', raw);
+    const raw = await res.text();
+    console.log(`   Статус Webhook: ${res.status}`);
+    
+    if (!res.ok) {
+      console.error('⚠️ Ошибка Webhook:', raw);
       return null;
     }
 
-    // ========================================================
-    // ШАГ 3: Получаем и парсим ответ
-    // ========================================================
-    let data;
-    try {
-      data = JSON.parse(raw);
-    } catch (e) {
-      console.error('❌ Ошибка парсинга JSON:', raw);
-      return null;
-    }
-
-    console.log('📦 Ответ от Botpress (полный):', JSON.stringify(data, null, 2));
+    console.log('   RAW ответ Botpress:', raw);
 
     let reply = null;
-    if (data.body && data.body.text) {
-      reply = data.body.text;
-    } else if (Array.isArray(data.body) && data.body.length > 0) {
-      reply = data.body[0].text;
+
+    // Пытаемся распарсить JSON
+    try {
+      const data = JSON.parse(raw);
+      console.log('📦 Распарсенный JSON:', JSON.stringify(data, null, 2));
+      
+      // Ищем текст во всех возможных форматах ответа Botpress
+      if (data.text) {
+        reply = data.text;
+      } else if (data.body && data.body.text) {
+        reply = data.body.text;
+      } else if (data.payload && data.payload.text) {
+        reply = data.payload.text;
+      } else if (Array.isArray(data.body) && data.body[0] && data.body[0].text) {
+        reply = data.body[0].text;
+      }
+    } catch (e) {
+      // Если это не JSON, значит Botpress вернул чистый текст
+      console.log('📦 Botpress вернул чистый текст');
+      reply = raw;
     }
 
     return reply;
@@ -156,16 +110,19 @@ async function sendToBotpress(userId, text) {
   }
 }
 
+// === Обработчик ВК ===
 app.post('/webhook', async (req, res) => {
   const body = req.body;
-  console.log('📨 Webhook:', JSON.stringify(body));
+  console.log('📨 Получен Webhook от ВК:', JSON.stringify(body));
 
+  // 1. Подтверждение сервера
   if (body.type === 'confirmation') {
-    console.log('🔐 Подтверждение сервера ВК');
+    console.log('🔐 Запрос подтверждения. Отправляю код:', VK_CONFIRMATION_CODE);
     res.status(200).type('text/plain').send(VK_CONFIRMATION_CODE);
     return;
   }
 
+  // 2. Новое входящее сообщение
   if (body.type === 'message_new') {
     const message = body.object?.message || {};
     const userId = message.from_id;
@@ -176,7 +133,7 @@ app.post('/webhook', async (req, res) => {
     let replyText = await sendToBotpress(userId, text);
 
     if (!replyText) {
-      console.log('⚠️ Botpress не дал ответа.');
+      console.log('⚠️ Botpress не дал ответа, использую запасной вариант.');
       replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Добро пожаловать!';
     }
 
@@ -184,17 +141,25 @@ app.post('/webhook', async (req, res) => {
     await sendToVk(userId, replyText);
   }
 
+  // Всегда отвечаем ВК "ok"
   res.status(200).send('ok');
 });
 
+// Проверка здоровья сервера
 app.get('/webhook', (req, res) => {
   res.send('VK-Botpress bridge is running!');
 });
 
+app.get('/', (req, res) => {
+  logEnv();
+  res.send('Server is alive! 🚀');
+});
+
+// Запуск
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log('\n===========================================');
   console.log('🚀 Сервер запущен!');
+  console.log(`📍 Порт: ${PORT}`);
   console.log('===========================================\n');
-  logEnv();
 });
