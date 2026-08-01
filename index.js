@@ -12,8 +12,9 @@ const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 
-// === КОНЕЧНАЯ ТОЧКА ДЛЯ ОБЩЕНИЯ (Converse API) ===
-const CONVERSE_URL = `https://api.botpress.cloud/v1/chat/messages`;
+// === НОВЫЙ URL ДЛЯ CHAT API (Workflows) ===
+const CHAT_API_URL = 'https://api.botpress.cloud/v1/chat/messages';
+
 function logEnv() {
   console.log('=== ENV CHECK ===');
   console.log('VK_TOKEN set:', !!VK_TOKEN);
@@ -52,19 +53,27 @@ async function sendToBotpress(userId, text) {
   }
 
   try {
-    const url = `${CONVERSE_URL}/${userId}`;
-    console.log(`🤖 Converse API: POST ${url}`);
+    // Формируем длинный ID для пользователя (требование нового API)
+    const bpUserId = `vk_${userId}`;
+
+    console.log(`🤖 Chat API: POST ${CHAT_API_URL}`);
     console.log(`   Текст: "${text}"`);
 
-    const res = await fetch(url, {
+    // СТРОГИЙ формат для нового API
+    const res = await fetch(CHAT_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${BOTPRESS_API_KEY}`
       },
       body: JSON.stringify({
+        userId: bpUserId,
+        conversationId: bpUserId,
         type: 'text',
-        text: text
+        tags: {},
+        payload: {
+          text: text
+        }
       })
     });
 
@@ -86,14 +95,12 @@ async function sendToBotpress(userId, text) {
 
     console.log('📦 Ответ от Botpress (JSON):', JSON.stringify(data, null, 2));
 
-    // Ищем ответ в стандартном поле, где всегда лежит текст
+    // Ищем ответ в правильных полях
     let reply = null;
-    if (data.responses && data.responses.length > 0) {
-        reply = data.responses[0].text;
-    } else if (data.output && data.output.text) {
-        reply = data.output.text;
+    if (data.body && data.body.text) {
+      reply = data.body.text;
     } else if (data.text) {
-        reply = data.text;
+      reply = data.text;
     }
 
     return reply;
