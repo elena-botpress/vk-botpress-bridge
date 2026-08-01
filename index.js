@@ -9,7 +9,7 @@ const VK_TOKEN = process.env.VK_TOKEN;
 const VK_CONFIRMATION_CODE = process.env.VK_CONFIRMATION_CODE;
 const VK_SECRET = process.env.VK_SECRET;
 
-// === ВАШ АДРЕС ВЕБХУКА (проверенный) ===
+// === ВАШ АДРЕС ВЕБХУКА ===
 const BOTPRESS_WEBHOOK_URL = 'https://webhook.botpress.cloud/2526d31b-9cca-46c0-80c8-58e01bb7d205';
 
 function logEnv() {
@@ -44,20 +44,20 @@ async function sendToVk(userId, text) {
 
 async function sendToBotpress(userId, text) {
   try {
-    // ВАЖНО: Мы отправляем команду /start, чтобы разбудить сценарий Main
-    const payloadText = '/start';
-
     console.log(`🤖 Webhook: POST ${BOTPRESS_WEBHOOK_URL}`);
-    console.log(`   Отправляем команду: "${payloadText}"`);
+    console.log(`   Отправляем текст: "${text}"`);
 
+    // ВАЖНО: Мы отправляем чистый текст пользователя
     const res = await fetch(BOTPRESS_WEBHOOK_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-bp-user-id': String(userId)
+        'x-bp-user-id': String(userId),
+        // Добавляем заголовок, чтобы Botpress понял, что это пользователь
+        'x-bp-user-channel': 'web' 
       },
       body: JSON.stringify({
-        text: payloadText
+        text: text
       })
     });
 
@@ -74,8 +74,11 @@ async function sendToBotpress(userId, text) {
       
       if (data.text) reply = data.text;
       else if (data.body && data.body.text) reply = data.body.text;
+      // Добавляем поиск в массиве, если ответ пришел списком
+      else if (Array.isArray(data.body) && data.body.length > 0 && data.body[0].text) {
+          reply = data.body[0].text;
+      }
     } catch (e) {
-      // Если это не JSON, а просто текст
       console.log('📦 Ответ от Botpress (Простой текст):', raw);
       reply = raw;
     }
@@ -104,8 +107,9 @@ app.post('/webhook', async (req, res) => {
     let replyText = await sendToBotpress(userId, text);
 
     if (!replyText) {
-      console.log('⚠️ Botpress не дал ответа.');
-      replyText = 'Здравствуйте! Я бот для обучения присяжных заседателей. Добро пожаловать!';
+      console.log('⚠️ Botpress не дал ответа (пустота).');
+      // Мы убрали запасную фразу, чтобы вы точно знали, когда придет ответ!
+      replyText = 'Я жду ответа от сценария... Пока он молчит.';
     }
 
     console.log(`🤖 Отправляю пользователю: "${replyText}"`);
