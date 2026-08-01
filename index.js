@@ -13,8 +13,7 @@ const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 
 // === КОНЕЧНАЯ ТОЧКА ДЛЯ ОБЩЕНИЯ (Converse API) ===
-const CONVERSE_URL = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}/converse`;
-
+const CONVERSE_URL = `https://api.botpress.cloud/v1/chat/messages`;
 function logEnv() {
   console.log('=== ENV CHECK ===');
   console.log('VK_TOKEN set:', !!VK_TOKEN);
