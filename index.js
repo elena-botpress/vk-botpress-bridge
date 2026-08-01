@@ -12,8 +12,9 @@ const VK_SECRET = process.env.VK_SECRET;
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY;
 const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;
 
-// === НОВЫЙ URL ДЛЯ BOTPRESS API (БЕЗ ВЕБХУКА) ===
-const BOTPRESS_API_URL = `https://api.botpress.cloud/v1/bots/${BOTPRESS_BOT_ID}/converse`;
+// === ОФИЦИАЛЬНЫЙ КЛИЕНТСКИЙ URL BOTPRESS (ИСПОЛЬЗУЕТ SDK) ===
+// Мы используем WebSocket-протокол через HTTP-туннель.
+const BP_CLIENT_URL = `https://chat.botpress.cloud/api/v1/messages`;
 
 function logEnv() {
   console.log('=== ENV CHECK ===');
@@ -52,20 +53,27 @@ async function sendToBotpress(userId, text) {
     return null;
   }
 
-  try {
-    const url = `${BOTPRESS_API_URL}/${userId}`;
-    console.log(`🤖 API Botpress: POST ${url}`);
-    console.log(`   Текст: "${text}"`);
+  // Используем длинный хешированный ID, чтобы избежать ошибок 400
+  const hashedUserId = require('crypto').createHash('md5').update(String(userId)).digest('hex');
 
-    const res = await fetch(url, {
+  try {
+    console.log(`🤖 Бот Клиент: POST ${BP_CLIENT_URL}`);
+    console.log(`   Текст: "${text}" (ID: ${hashedUserId})`);
+
+    const res = await fetch(BP_CLIENT_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${BOTPRESS_API_KEY}`
       },
       body: JSON.stringify({
+        userId: hashedUserId,
+        conversationId: hashedUserId,
         type: 'text',
-        text: text
+        tags: {},
+        payload: {
+          text: text
+        }
       })
     });
 
@@ -89,8 +97,8 @@ async function sendToBotpress(userId, text) {
     console.log('📦 Ответ от Botpress (JSON):', JSON.stringify(data, null, 2));
 
     let reply = null;
-    if (data.responses && data.responses.length > 0) {
-      reply = data.responses[0].text;
+    if (data.body && data.body.text) {
+      reply = data.body.text;
     } else if (data.text) {
       reply = data.text;
     }
